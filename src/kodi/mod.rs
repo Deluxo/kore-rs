@@ -4,3 +4,4 @@ pub mod types;
 
 pub use types::*;
 pub use client::KodiClient;
+pub use discovery::DiscoveryService;

@@ -1,8 +1,3 @@
-use gtk::prelude::*;
-use relm4::{
-    ComponentParts, ComponentSender, SimpleComponent,
-};
-
 #[derive(Debug, Clone)]
 pub enum NowPlayingMsg {
     Refresh,
@@ -12,8 +7,6 @@ pub enum NowPlayingMsg {
     Previous,
     Seek(i64),
 }
-
-pub struct RootWidgets;
 
 #[derive(Debug, Default)]
 pub struct NowPlayingModel {
@@ -26,23 +19,8 @@ pub struct NowPlayingModel {
     pub is_playing: bool,
 }
 
-#[relm4::component]
-impl SimpleComponent for NowPlayingModel {
-    type Init = ();
-    type Input = NowPlayingMsg;
-    type Output = ();
-    type Widgets = RootWidgets;
-
-    fn init(
-        _init: Self::Init,
-        root: Self::Root,
-        _sender: ComponentSender<Self>,
-    ) -> ComponentParts<Self> {
-        let model = NowPlayingModel::default();
-        ComponentParts { model, widgets: () }
-    }
-
-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+impl NowPlayingModel {
+    pub fn update(&mut self, msg: NowPlayingMsg) {
         match msg {
             NowPlayingMsg::Refresh => {
                 tracing::debug!("Refreshing now playing info");

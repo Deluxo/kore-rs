@@ -1,8 +1,3 @@
-use gtk::prelude::*;
-use relm4::{
-    ComponentParts, ComponentSender, SimpleComponent,
-};
-
 #[derive(Debug, Clone)]
 pub enum DiscoveryMsg {
     StartDiscovery,
@@ -12,31 +7,14 @@ pub enum DiscoveryMsg {
     Cancel,
 }
 
-pub struct RootWidgets;
-
 #[derive(Debug, Default)]
 pub struct DiscoveryModel {
     pub discovered_hosts: Vec<crate::kodi::types::HostInfo>,
     pub is_discovering: bool,
 }
 
-#[relm4::component]
-impl SimpleComponent for DiscoveryModel {
-    type Init = ();
-    type Input = DiscoveryMsg;
-    type Output = ();
-    type Widgets = RootWidgets;
-
-    fn init(
-        _init: Self::Init,
-        root: Self::Root,
-        _sender: ComponentSender<Self>,
-    ) -> ComponentParts<Self> {
-        let model = DiscoveryModel::default();
-        ComponentParts { model, widgets: () }
-    }
-
-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+impl DiscoveryModel {
+    pub fn update(&mut self, msg: DiscoveryMsg) {
         match msg {
             DiscoveryMsg::StartDiscovery => {
                 self.is_discovering = true;

@@ -131,3 +131,77 @@ See `Cargo.toml` for all dependencies. Key ones:
 - `serde` / `serde_json` - Serialization
 - `dns-sd` - Service discovery
 - `tracing` - Logging
+
+## Important Learnings
+
+### Relm4 0.9 quirks
+
+The codebase uses Relm4 0.9, which has some API differences from newer versions:
+
+1. **`view!` macro limitations**: The macro has specific syntax requirements. For complex UIs, it's often easier to build the UI programmatically in `main.rs` rather than using the `#[relm4::component]` macro.
+
+2. **Widget builders**: Use builder pattern with `.builder()` for constructing widgets:
+   ```rust
+   gtk::Button::builder()
+       .label("Discover")
+       .sensitive(true)
+       .build()
+   ```
+
+3. **Margin methods**: GTK4 renamed many margin methods:
+   - `set_margin(x)` → `set_margin_all(x)` or use `margin_start()`, `margin_end()`, etc.
+   - `set_spacing(x)` instead of constructor parameter
+
+4. **ListBoxRow**: Add children before appending:
+   ```rust
+   let row = gtk::ListBoxRow::new();
+   row.set_child(Some(&box_));
+   list.append(&row);
+   ```
+
+### Threading with GTK
+
+GTK widgets are NOT thread-safe. Critical rules:
+
+1. **Never pass GTK widgets to `std::thread::spawn`**: This will fail with `*mut c_void cannot be sent between threads safely`
+
+2. **UI updates must happen on main thread**: Use synchronous operations in callbacks, or if using threads:
+   - Do background work in thread
+   - Pass only simple data (strings, ints) back to main thread
+   - Update widgets in the main thread after thread completes
+
+3. **Clone widgets before moving into closures**:
+   ```rust
+   discover_button.clone().connect_clicked(move |_| {
+       // use the cloned button
+   });
+   ```
+
+### Simple UI Approach
+
+For this project, the simplest pattern is building the UI directly in `main.rs`:
+
+```rust
+let app = Application::builder()
+    .application_id("org.korers.app")
+    .build();
+
+app.connect_activate(|app| {
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .title("Korers")
+        .default_width(800)
+        .default_height(600)
+        .build();
+    
+    // Build UI programmatically here
+    // Access widgets via cloned references in callbacks
+});
+```
+
+### SSDP/UDP Discovery
+
+The discovery service uses:
+- Multicast address: `239.255.255.250:1900`
+- MSEARCH request with headers: `MAN: "ssdp:discover"`, `MX: 3`, `ST: ssdp:all`
+- Parse `Location:` header for host IP and port

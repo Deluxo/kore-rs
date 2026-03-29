@@ -1,7 +1,3 @@
-use gtk::prelude::*;
-use relm4::{
-    ComponentParts, ComponentSender, SimpleComponent,
-};
 use crate::host::Host;
 
 #[derive(Debug, Clone)]
@@ -13,8 +9,6 @@ pub enum HostListMsg {
     DiscoveryFinished(Vec<Host>),
 }
 
-pub struct RootWidgets;
-
 #[derive(Debug, Default)]
 pub struct HostListModel {
     pub hosts: Vec<Host>,
@@ -22,23 +16,8 @@ pub struct HostListModel {
     pub is_discovering: bool,
 }
 
-#[relm4::component]
-impl SimpleComponent for HostListModel {
-    type Init = ();
-    type Input = HostListMsg;
-    type Output = ();
-    type Widgets = RootWidgets;
-
-    fn init(
-        _init: Self::Init,
-        root: Self::Root,
-        _sender: ComponentSender<Self>,
-    ) -> ComponentParts<Self> {
-        let model = HostListModel::default();
-        ComponentParts { model, widgets: () }
-    }
-
-    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+impl HostListModel {
+    pub fn update(&mut self, msg: HostListMsg) {
         match msg {
             HostListMsg::SelectHost(id) => {
                 self.selected_host = Some(id.clone());
