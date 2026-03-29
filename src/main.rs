@@ -167,6 +167,35 @@ fn main() {
             discover_button.set_sensitive(true);
         });
 
+        let host_list_for_add = host_list.clone();
+        
+        add_button.connect_clicked(move |_| {
+            if let Some((dialog, name_entry, address_entry, port_spin)) = show_add_host_dialog() {
+                let host_list = host_list_for_add.clone();
+                
+                dialog.connect_response(move |dialog, response| {
+                    if response == gtk::ResponseType::Ok {
+                        let name = name_entry.text().to_string();
+                        let address = address_entry.text().to_string();
+                        let port = port_spin.value() as u16;
+                        
+                        if !name.is_empty() && !address.is_empty() {
+                            let host = Host::new(name, address, port);
+                            
+                            add_host_to_list(&host_list, &host);
+                            
+                            if let Ok(mut manager) = HostManager::new() {
+                                let _ = manager.add_host(host);
+                            }
+                        }
+                    }
+                    dialog.destroy();
+                });
+                
+                dialog.show();
+            }
+        });
+
         window.show();
     });
     
@@ -200,4 +229,51 @@ fn add_host_to_list(list: &gtk::ListBox, host: &Host) {
 
     row.set_child(Some(&box_));
     list.append(&row);
+}
+
+fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton)> {
+    let dialog = gtk::Dialog::new();
+    dialog.set_title(Some("Add Host"));
+    dialog.set_modal(true);
+    dialog.set_default_size(350, 200);
+
+    let content = dialog.content_area();
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_spacing(12);
+
+    let form = gtk::Grid::new();
+    form.set_row_spacing(8);
+    form.set_column_spacing(8);
+
+    let name_label = gtk::Label::new(Some("Name:"));
+    name_label.set_halign(gtk::Align::End);
+    let name_entry = gtk::Entry::new();
+    name_entry.set_placeholder_text(Some("Kodi @ 192.168.1.100"));
+
+    let address_label = gtk::Label::new(Some("Address:"));
+    address_label.set_halign(gtk::Align::End);
+    let address_entry = gtk::Entry::new();
+    address_entry.set_placeholder_text(Some("192.168.1.100"));
+
+    let port_label = gtk::Label::new(Some("Port:"));
+    port_label.set_halign(gtk::Align::End);
+    let port_adjustment = gtk::Adjustment::new(8080.0, 1.0, 65535.0, 1.0, 10.0, 0.0);
+    let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
+
+    form.attach(&name_label, 0, 0, 1, 1);
+    form.attach(&name_entry, 1, 0, 1, 1);
+    form.attach(&address_label, 0, 1, 1, 1);
+    form.attach(&address_entry, 1, 1, 1, 1);
+    form.attach(&port_label, 0, 2, 1, 1);
+    form.attach(&port_spin, 1, 2, 1, 1);
+
+    content.append(&form);
+
+    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+    dialog.add_button("Add", gtk::ResponseType::Ok);
+
+    Some((dialog, name_entry, address_entry, port_spin))
 }
