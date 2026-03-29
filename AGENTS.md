@@ -2,6 +2,10 @@
 
 This document provides guidance for AI agents working on the Korers codebase.
 
+## Ground rules
+
+* No command shall be run without asking the user first.
+
 ## Project Structure
 
 ```

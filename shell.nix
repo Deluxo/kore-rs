@@ -1,32 +1,22 @@
-let
-  pkgs = import (fetchTarball("https://github.com/NixOS/nixpkgs/archive/nixos-24.11.tar.gz")) {};
-in
-pkgs.callPackage (
-  {
-    mkShell,
-    cargo,
-    rustc,
-    pkg-config,
-    gtk4,
-    libsoup_3,
-    glib,
-    pango,
-    gdk-pixbuf,
-  }:
-  mkShell {
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.mkShell {
     strictDeps = true;
-    nativeBuildInputs = [
+    nativeBuildInputs = with pkgs; [
       cargo
       rustc
       pkg-config
+      avahi
+      avahi-compat
     ];
-    buildInputs = [
+    buildInputs = with pkgs; [
       gtk4
       libsoup_3
       glib
       pango
       gdk-pixbuf
+      avahi
+      avahi-compat
     ];
     LIBRARY_PATH = "${pkgs.gdk-pixbuf}/lib";
-  }
-) { }
+}
