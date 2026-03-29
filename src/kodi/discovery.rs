@@ -83,6 +83,8 @@ impl DiscoveryService {
             }
         }
 
+        let name_for_ip = name.clone();
+
         if let (Some(addr), Some(n)) = (address, name) {
             return Some(HostInfo::new(n, addr, port));
         }
@@ -90,8 +92,8 @@ impl DiscoveryService {
         let ip_pattern = regex_lite::Regex::new(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})").ok()?;
         if let Some(caps) = ip_pattern.captures(response) {
             let address = caps.get(1)?.as_str().to_string();
-            let name = name.unwrap_or_else(|| format!("Kodi @ {}", address));
-            return Some(HostInfo::new(name, address, port));
+            let host_name = name_for_ip.unwrap_or_else(|| format!("Kodi @ {}", address));
+            return Some(HostInfo::new(host_name, address, port));
         }
 
         None

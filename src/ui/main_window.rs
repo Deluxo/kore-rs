@@ -1,10 +1,10 @@
-use relm4::gtk;
+use gtk::prelude::*;
 use relm4::{
-    ComponentParts, ComponentSender, SimpleComponent, RelmApp, RelmWidgetExt,
-    view, view_tree,
+    ComponentParts, ComponentSender, SimpleComponent,
 };
-use crate::host::{Host, HostManager};
-use crate::kodi::{KodiClient, HostInfo};
+use crate::host::Host;
+use crate::host::manager::HostManager;
+use crate::kodi::HostInfo;
 
 #[derive(Debug, Clone)]
 pub enum AppMsg {
@@ -52,6 +52,8 @@ pub enum NowPlayingMsg {
     Seek(i64),
 }
 
+pub struct RootWidgets;
+
 #[derive(Debug, Default)]
 pub struct AppModel {
     pub hosts: Vec<Host>,
@@ -98,54 +100,7 @@ impl SimpleComponent for AppModel {
     type Init = ();
     type Input = AppMsg;
     type Output = ();
-    type Widgets = AppWidgets;
-
-    view! {
-        gtk::ApplicationWindow {
-            set_title: Some("Korers - Kodi Remote"),
-            set_default_size: (900, 700),
-
-            gtk::Box {
-                set_orientation: gtk::Orientation::Vertical,
-
-                #[name = "header_bar"]
-                gtk::HeaderBar {
-                    set_show_title_buttons: true,
-                    set_title_widget: Some(&gtk::Label::new(Some("Korers"))),
-                },
-
-                #[name = "content_box"]
-                gtk::Box {
-                    set_orientation: gtk::Orientation::Horizontal,
-                    set_hexpand: true,
-                    set_vexpand: true,
-
-                    #[name = "sidebar"]
-                    gtk::StackSidebar {
-                        set_width_request: 200,
-                    },
-
-                    #[name = "content_stack"]
-                    gtk::Stack {
-                        set_hexpand: true,
-                    },
-                },
-
-                gtk::Statusbar {
-                    #[name = "statusbar"]
-                    set_margin_top: 5,
-                },
-            }
-        }
-    }
-
-    fn init_root() -> Self::Root {
-        gtk::ApplicationWindow::builder()
-            .title("Korers - Kodi Remote")
-            .default_width(900)
-            .default_height(700)
-            .build()
-    }
+    type Widgets = RootWidgets;
 
     fn init(
         _init: Self::Init,
@@ -155,12 +110,10 @@ impl SimpleComponent for AppModel {
         let mut model = AppModel::default();
         model.load_hosts();
 
-        let widgets = AppWidgets::from_builder(&root, ());
-
-        ComponentParts { model, widgets }
+        ComponentParts { model, widgets: () }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+    fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
         match msg {
             AppMsg::HostSelected(id) => {
                 self.selected_host = Some(id.clone());
@@ -193,16 +146,4 @@ impl SimpleComponent for AppModel {
             }
         }
     }
-
-    fn update_view(&self, _widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
-    }
-}
-
-#[relm4::macros::widget_struct]
-pub struct AppWidgets {
-    pub header_bar: gtk::HeaderBar,
-    pub content_box: gtk::Box,
-    pub sidebar: gtk::StackSidebar,
-    pub content_stack: gtk::Stack,
-    pub statusbar: gtk::Statusbar,
 }
