@@ -239,6 +239,8 @@ impl KodiClient {
         #[derive(Serialize)]
         struct Params {
             playerid: i32,
+            #[serde(rename = "play")]
+            play_state: String,
         }
 
         #[derive(Deserialize)]
@@ -249,7 +251,28 @@ impl KodiClient {
         let result: PlayPauseResult = self
             .call(
                 JsonRpcRequest::new("Player.PlayPause")
-                    .with_params(Params { playerid: player_id }),
+                    .with_params(Params { playerid: player_id, play_state: "toggle".to_string() }),
+            )
+            .await?;
+        Ok(result.speed)
+    }
+
+    pub async fn play_pause_with(&self, player_id: i32, play: bool) -> Result<i32, ClientError> {
+        #[derive(Serialize)]
+        struct Params {
+            playerid: i32,
+            play: bool,
+        }
+
+        #[derive(Deserialize)]
+        struct PlayPauseResult {
+            speed: i32,
+        }
+
+        let result: PlayPauseResult = self
+            .call(
+                JsonRpcRequest::new("Player.PlayPause")
+                    .with_params(Params { playerid: player_id, play }),
             )
             .await?;
         Ok(result.speed)

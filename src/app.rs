@@ -50,8 +50,9 @@ impl App {
             let window = gtk::ApplicationWindow::builder()
                 .application(app)
                 .title("Korers")
-                .default_width(400)
-                .default_height(700)
+                .default_width(600)
+                .default_height(900)
+                .resizable(true)
                 .build();
 
             // Header
@@ -381,30 +382,37 @@ fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     box_.set_margin_start(12); box_.set_margin_end(12); box_.set_margin_top(12); box_.set_margin_bottom(12);
     box_.set_hexpand(true); box_.set_vexpand(true);
 
-    // Nav
-    let nav = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    nav.set_halign(gtk::Align::Center);
-    let back = gtk::Button::with_label("Back");
-    let home = gtk::Button::with_label("Home");
-    let info = gtk::Button::with_label("Info");
+    // Nav buttons - top row
+    let nav = gtk::Grid::new();
+    nav.set_column_homogeneous(true);
+    nav.set_row_homogeneous(true);
+    nav.set_hexpand(true);
+    nav.set_vexpand(true);
+    let back = gtk::Button::builder().label("Back").hexpand(true).vexpand(true).build();
+    let home = gtk::Button::builder().label("Home").hexpand(true).vexpand(true).build();
+    let info = gtk::Button::builder().label("Info").hexpand(true).vexpand(true).build();
     let c = client.clone();
     back.connect_clicked(move |_| send_input(&c, InputAction::Back));
     let c = client.clone();
     home.connect_clicked(move |_| send_input(&c, InputAction::Home));
     let c = client.clone();
     info.connect_clicked(move |_| send_input(&c, InputAction::Info));
-    nav.append(&back); nav.append(&home); nav.append(&info);
+    nav.attach(&back, 0, 0, 1, 1);
+    nav.attach(&home, 1, 0, 1, 1);
+    nav.attach(&info, 2, 0, 1, 1);
     box_.append(&nav);
 
-    // D-pad
-    let dpad = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    dpad.set_halign(gtk::Align::Center);
-    let up = gtk::Button::with_label("▲");
-    let mid = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let left = gtk::Button::with_label("◀");
-    let ok = gtk::Button::with_label("OK");
-    let right = gtk::Button::with_label("▶");
-    let down = gtk::Button::with_label("▼");
+    // D-pad - 3x3 grid
+    let dpad = gtk::Grid::new();
+    dpad.set_column_homogeneous(true);
+    dpad.set_row_homogeneous(true);
+    dpad.set_hexpand(true);
+    dpad.set_vexpand(true);
+    let up = gtk::Button::builder().label("▲").hexpand(true).vexpand(true).build();
+    let left = gtk::Button::builder().label("◀").hexpand(true).vexpand(true).build();
+    let ok = gtk::Button::builder().label("OK").hexpand(true).vexpand(true).build();
+    let right = gtk::Button::builder().label("▶").hexpand(true).vexpand(true).build();
+    let down = gtk::Button::builder().label("▼").hexpand(true).vexpand(true).build();
     
     let c = client.clone();
     up.connect_clicked(move |_| send_input(&c, InputAction::Up));
@@ -417,17 +425,23 @@ fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let c = client.clone();
     down.connect_clicked(move |_| send_input(&c, InputAction::Down));
 
-    mid.append(&left); mid.append(&ok); mid.append(&right);
-    dpad.append(&up); dpad.append(&mid); dpad.append(&down);
+    dpad.attach(&up, 1, 0, 1, 1);
+    dpad.attach(&left, 0, 1, 1, 1);
+    dpad.attach(&ok, 1, 1, 1, 1);
+    dpad.attach(&right, 2, 1, 1, 1);
+    dpad.attach(&down, 1, 2, 1, 1);
     box_.append(&dpad);
 
-    // Transport
-    let transport = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    transport.set_halign(gtk::Align::Center);
-    let t_prev = gtk::Button::with_label("⏮");
-    let t_play = gtk::Button::with_label("▶/⏸");
-    let t_stop = gtk::Button::with_label("⏹");
-    let t_next = gtk::Button::with_label("⏭");
+    // Transport - 4 buttons
+    let transport = gtk::Grid::new();
+    transport.set_column_homogeneous(true);
+    transport.set_row_homogeneous(true);
+    transport.set_hexpand(true);
+    transport.set_vexpand(true);
+    let t_prev = gtk::Button::builder().label("⏮").hexpand(true).vexpand(true).build();
+    let t_play = gtk::Button::builder().label("▶/⏸").hexpand(true).vexpand(true).build();
+    let t_stop = gtk::Button::builder().label("⏹").hexpand(true).vexpand(true).build();
+    let t_next = gtk::Button::builder().label("⏭").hexpand(true).vexpand(true).build();
 
     let c = client.clone();
     t_prev.connect_clicked(move |_| transport_action(&c, "previous"));
@@ -438,15 +452,21 @@ fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let c = client.clone();
     t_next.connect_clicked(move |_| transport_action(&c, "next"));
 
-    transport.append(&t_prev); transport.append(&t_play); transport.append(&t_stop); transport.append(&t_next);
+    transport.attach(&t_prev, 0, 0, 1, 1);
+    transport.attach(&t_play, 1, 0, 1, 1);
+    transport.attach(&t_stop, 2, 0, 1, 1);
+    transport.attach(&t_next, 3, 0, 1, 1);
     box_.append(&transport);
 
-    // Volume
-    let volume = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    volume.set_halign(gtk::Align::Center);
-    let mute = gtk::Button::with_label("🔇");
-    let v_down = gtk::Button::with_label("🔉");
-    let v_up = gtk::Button::with_label("🔊");
+    // Volume - 3 buttons
+    let volume = gtk::Grid::new();
+    volume.set_column_homogeneous(true);
+    volume.set_row_homogeneous(true);
+    volume.set_hexpand(true);
+    volume.set_vexpand(true);
+    let mute = gtk::Button::builder().label("🔇").hexpand(true).vexpand(true).build();
+    let v_down = gtk::Button::builder().label("🔉").hexpand(true).vexpand(true).build();
+    let v_up = gtk::Button::builder().label("🔊").hexpand(true).vexpand(true).build();
 
     let c = client.clone();
     mute.connect_clicked(move |_| volume_mute(&c));
@@ -455,7 +475,9 @@ fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let c = client.clone();
     v_up.connect_clicked(move |_| volume_change(&c, 10));
 
-    volume.append(&mute); volume.append(&v_down); volume.append(&v_up);
+    volume.attach(&mute, 0, 0, 1, 1);
+    volume.attach(&v_down, 1, 0, 1, 1);
+    volume.attach(&v_up, 2, 0, 1, 1);
     box_.append(&volume);
 
     box_
@@ -484,7 +506,13 @@ fn transport_action(client: &Rc<RefCell<Option<KodiClient>>>, action: &str) {
         if let Ok(players) = rt.block_on(c.get_active_players()) {
             if let Some(p) = players.first() {
                 match action {
-                    "play_pause" => { let _ = rt.block_on(c.play_pause(p.playerid)); }
+                    "play_pause" => {
+                        tracing::debug!("play_pause: player_id={}", p.playerid);
+                        match rt.block_on(c.play_pause(p.playerid)) {
+                            Ok(speed) => tracing::debug!("  speed={}", speed),
+                            Err(e) => tracing::warn!("  play_pause error: {:?}", e),
+                        }
+                    }
                     "stop" => { let _ = rt.block_on(c.stop(p.playerid)); }
                     "previous" => { let _ = rt.block_on(c.go_to(p.playerid, "previous")); }
                     "next" => { let _ = rt.block_on(c.go_to(p.playerid, "next")); }
