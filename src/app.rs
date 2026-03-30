@@ -83,10 +83,11 @@ impl App {
 
             let btns = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             let discover = gtk::Button::with_label("Discover");
+            let connect = gtk::Button::with_label("Connect");
             let add = gtk::Button::with_label("Add");
             let edit = gtk::Button::with_label("Edit");
             let del = gtk::Button::with_label("Del");
-            btns.append(&discover); btns.append(&add); btns.append(&edit); btns.append(&del);
+            btns.append(&discover); btns.append(&connect); btns.append(&add); btns.append(&edit); btns.append(&del);
             host_box.append(&btns);
 
             let list = list.clone();
@@ -105,6 +106,29 @@ impl App {
                         }
                     }
                     Err(e) => tracing::warn!("Discovery failed: {:?}", e),
+                }
+            });
+
+            let connect = connect.clone();
+            let list_conn = list.clone();
+            let client_conn = client.clone();
+            let mgr_conn = host_manager.clone();
+            connect.connect_clicked(move |_| {
+                if let Some(row) = list_conn.selected_row() {
+                    let idx = row.index() as usize;
+                    let m = mgr_conn.borrow();
+                    if let Some(manager) = m.as_ref() {
+                        if let Some(host) = manager.hosts().get(idx) {
+                            let kodi_client = KodiClient::from_host(host);
+                            let rt = tokio::runtime::Runtime::new().unwrap();
+                            if rt.block_on(kodi_client.ping()).is_ok() {
+                                client_conn.replace(Some(kodi_client));
+                                tracing::info!("Connected to {}", host.name);
+                            } else {
+                                tracing::warn!("Failed to ping {}", host.name);
+                            }
+                        }
+                    }
                 }
             });
 
