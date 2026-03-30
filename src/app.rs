@@ -460,7 +460,7 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let player_info_poll = player_info.clone();
     let client_poll = client.clone();
     let seek_hint_clone = seek_hint.clone();
-    glib::source::timeout_add_seconds_local(2, move || {
+    glib::source::timeout_add_seconds_local(1, move || {
         let title2 = title_clone.clone();
         let desc2 = desc_clone.clone();
         let seeker2 = seeker_clone.clone();
