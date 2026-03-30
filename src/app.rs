@@ -66,6 +66,16 @@ impl App {
             let popover = gtk::Popover::new();
             let client: Rc<RefCell<Option<KodiClient>>> = Rc::new(RefCell::new(None));
             
+            // Auto-connect to first host
+            if let Some(first_host) = hosts.first() {
+                let kodi_client = KodiClient::from_host(first_host);
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                if rt.block_on(kodi_client.ping()).is_ok() {
+                    client.replace(Some(kodi_client));
+                    tracing::info!("Auto-connected to {}", first_host.name);
+                }
+            }
+            
             let host_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
             host_box.set_width_request(320);
             host_box.set_margin_start(12); host_box.set_margin_end(12); 
