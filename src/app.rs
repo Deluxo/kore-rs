@@ -428,32 +428,6 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     time_box.append(&time_ends);
     box_.append(&time_box);
 
-    // Transport controls
-    let transport = gtk::Grid::new();
-    transport.set_column_homogeneous(true);
-    transport.set_row_homogeneous(true);
-    transport.set_hexpand(true);
-
-    let prev = gtk::Button::builder().label("⏮").hexpand(true).vexpand(true).build();
-    let play = gtk::Button::builder().label("▶/⏸").hexpand(true).vexpand(true).build();
-    let stop = gtk::Button::builder().label("⏹").hexpand(true).vexpand(true).build();
-    let next = gtk::Button::builder().label("⏭").hexpand(true).vexpand(true).build();
-
-    let c = client.clone();
-    prev.connect_clicked(move |_| transport_action(&c, "previous"));
-    let c = client.clone();
-    play.connect_clicked(move |_| transport_action(&c, "play_pause"));
-    let c = client.clone();
-    stop.connect_clicked(move |_| transport_action(&c, "stop"));
-    let c = client.clone();
-    next.connect_clicked(move |_| transport_action(&c, "next"));
-
-    transport.attach(&prev, 0, 0, 1, 1);
-    transport.attach(&play, 1, 0, 1, 1);
-    transport.attach(&stop, 2, 0, 1, 1);
-    transport.attach(&next, 3, 0, 1, 1);
-    box_.append(&transport);
-
     // Polling
     let title_clone = title.clone();
     let desc_clone = description.clone();
@@ -573,15 +547,40 @@ fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     box_.set_margin_start(12); box_.set_margin_end(12); box_.set_margin_top(12); box_.set_margin_bottom(12);
     box_.set_hexpand(true); box_.set_vexpand(true);
 
+    // Transport controls
+    let transport = gtk::Grid::new();
+    transport.set_column_homogeneous(true);
+    transport.set_row_homogeneous(true);
+    transport.set_hexpand(true);
+
+    let prev = gtk::Button::builder().label("⏮").hexpand(true).build();
+    let play = gtk::Button::builder().label("▶/⏸").hexpand(true).build();
+    let stop = gtk::Button::builder().label("⏹").hexpand(true).build();
+    let next = gtk::Button::builder().label("⏭").hexpand(true).build();
+
+    let c = client.clone();
+    prev.connect_clicked(move |_| transport_action(&c, "previous"));
+    let c = client.clone();
+    play.connect_clicked(move |_| transport_action(&c, "play_pause"));
+    let c = client.clone();
+    stop.connect_clicked(move |_| transport_action(&c, "stop"));
+    let c = client.clone();
+    next.connect_clicked(move |_| transport_action(&c, "next"));
+
+    transport.attach(&prev, 0, 0, 1, 1);
+    transport.attach(&play, 1, 0, 1, 1);
+    transport.attach(&stop, 2, 0, 1, 1);
+    transport.attach(&next, 3, 0, 1, 1);
+    box_.append(&transport);
+
     // Nav buttons - top row
     let nav = gtk::Grid::new();
     nav.set_column_homogeneous(true);
     nav.set_row_homogeneous(true);
     nav.set_hexpand(true);
-    nav.set_vexpand(true);
-    let back = gtk::Button::builder().label("Back").hexpand(true).vexpand(true).build();
-    let home = gtk::Button::builder().label("Home").hexpand(true).vexpand(true).build();
-    let info = gtk::Button::builder().label("Info").hexpand(true).vexpand(true).build();
+    let back = gtk::Button::builder().label("Back").hexpand(true).build();
+    let home = gtk::Button::builder().label("Home").hexpand(true).build();
+    let info = gtk::Button::builder().label("Info").hexpand(true).build();
     let c = client.clone();
     back.connect_clicked(move |_| send_input(&c, InputAction::Back));
     let c = client.clone();
@@ -623,41 +622,14 @@ fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     dpad.attach(&down, 1, 2, 1, 1);
     box_.append(&dpad);
 
-    // Transport - 4 buttons
-    let transport = gtk::Grid::new();
-    transport.set_column_homogeneous(true);
-    transport.set_row_homogeneous(true);
-    transport.set_hexpand(true);
-    transport.set_vexpand(true);
-    let t_prev = gtk::Button::builder().label("⏮").hexpand(true).vexpand(true).build();
-    let t_play = gtk::Button::builder().label("▶/⏸").hexpand(true).vexpand(true).build();
-    let t_stop = gtk::Button::builder().label("⏹").hexpand(true).vexpand(true).build();
-    let t_next = gtk::Button::builder().label("⏭").hexpand(true).vexpand(true).build();
-
-    let c = client.clone();
-    t_prev.connect_clicked(move |_| transport_action(&c, "previous"));
-    let c = client.clone();
-    t_play.connect_clicked(move |_| transport_action(&c, "play_pause"));
-    let c = client.clone();
-    t_stop.connect_clicked(move |_| transport_action(&c, "stop"));
-    let c = client.clone();
-    t_next.connect_clicked(move |_| transport_action(&c, "next"));
-
-    transport.attach(&t_prev, 0, 0, 1, 1);
-    transport.attach(&t_play, 1, 0, 1, 1);
-    transport.attach(&t_stop, 2, 0, 1, 1);
-    transport.attach(&t_next, 3, 0, 1, 1);
-    box_.append(&transport);
-
     // Volume - 3 buttons
     let volume = gtk::Grid::new();
     volume.set_column_homogeneous(true);
     volume.set_row_homogeneous(true);
     volume.set_hexpand(true);
-    volume.set_vexpand(true);
-    let mute = gtk::Button::builder().label("🔇").hexpand(true).vexpand(true).build();
-    let v_down = gtk::Button::builder().label("🔉").hexpand(true).vexpand(true).build();
-    let v_up = gtk::Button::builder().label("🔊").hexpand(true).vexpand(true).build();
+    let mute = gtk::Button::builder().label("🔇").hexpand(true).build();
+    let v_down = gtk::Button::builder().label("🔉").hexpand(true).build();
+    let v_up = gtk::Button::builder().label("🔊").hexpand(true).build();
 
     let c = client.clone();
     mute.connect_clicked(move |_| volume_mute(&c));
