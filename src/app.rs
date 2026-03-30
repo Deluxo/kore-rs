@@ -379,24 +379,56 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     
     // For seek - store current player info
     let player_info: Rc<RefCell<Option<(i32, i64)>>> = Rc::new(RefCell::new(None));
+    let previous_poll_value = Rc::new(RefCell::new(0.0));
+    let was_seeking = Rc::new(RefCell::new(false));
     
-    // Create click gesture for seek (only fires on user interaction)
-    let gesture = GestureClick::new();
-    let seeker_gesture = gesture.clone();
-    let player_info_gesture = player_info.clone();
-    let client_gesture = client.clone();
-    seeker_gesture.connect_released(move |_, _, _, _| {
-        let percent = seeker_adj.value();
-        if let Some((player_id, _)) = *player_info_gesture.borrow() {
-            if let Some(ref c) = *client_gesture.borrow() {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                let _ = rt.block_on(c.seek_percentage(player_id, percent));
+    // Track when user manually adjusts the scale
+    let adjustment_clone = seeker_adj.clone();
+    let prev_value_clone = previous_poll_value.clone();
+    let was_seeking_clone = was_seeking.clone();
+    let player_info_clone = player_info.clone();
+    let client_clone = client.clone();
+    let seeker_clone = seeker.clone();
+    seeker_clone.connect_value_changed(move |_scale| {
+        let curr = adjustment_clone.value();
+        let prev = *prev_value_clone.borrow();
+        
+        // Only trigger seek if value changed significantly (> 1%)
+        // This prevents polling from triggering seeks
+        if (curr - prev).abs() > 1.0 {
+            tracing::info!("Slider moved by user! {} -> {} (diff: {:.1})", prev, curr, curr - prev);
+            *was_seeking_clone.borrow_mut() = true;
+            if let Some((player_id, _)) = *player_info_clone.borrow() {
+                if let Some(ref c) = *client_clone.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
+                }
             }
         }
     });
-    seeker.add_controller(gesture);
+    
+    // Initially set to prevent immediate seek on first poll
+    *previous_poll_value.borrow_mut() = seeker_adj.value();
+    
+    // Visual feedback hint
+    let seek_hint = gtk::Label::new(Some("👆 tap to seek"));
+    seek_hint.set_halign(gtk::Align::Center);
+    seek_hint.set_margin_top(4);
+    seek_hint.set_hexpand(true);
+    seek_hint.set_css_classes(&["secondary"]);
+    
+    let seek_hint_clone = seek_hint.clone();
+    let was_seeking_clone2 = was_seeking.clone();
+    seeker_clone.connect_value_changed(move |_scale| {
+        let is_seeking = *was_seeking_clone2.borrow();
+        if is_seeking {
+            seek_hint_clone.set_label("✨ SEEKING... ✨");
+            *was_seeking_clone2.borrow_mut() = false;
+        }
+    });
     
     box_.append(&seeker);
+    box_.append(&seek_hint);
 
     // Time labels: current | remaining | ends at
     let time_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -427,6 +459,7 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let time_ends_clone = time_ends.clone();
     let player_info_poll = player_info.clone();
     let client_poll = client.clone();
+    let seek_hint_clone = seek_hint.clone();
     glib::source::timeout_add_seconds_local(2, move || {
         let title2 = title_clone.clone();
         let desc2 = desc_clone.clone();
@@ -489,22 +522,24 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
                         tracing::debug!("NOW PLAYING: label={}, time={}/{}", label, cur_time, duration);
                         
                         let t2 = title2.clone();
-                        let d2 = desc2.clone();
-                        let s2 = seeker2.clone();
-                        let tc2 = time_cur2.clone();
-                        let tr2 = time_rem2.clone();
-                        let te2 = time_ends2.clone();
-                        glib::idle_add_local_once(move || {
-                            t2.set_markup(&format!("<big><b>{}</b></big>", label));
-                            d2.set_text(&desc);
-                            s2.set_value(percent);
-                            tc2.set_text(&format_time(cur_time));
-                            tr2.set_text(&format!("-{}", format_time(duration - cur_time)));
-                            // Calculate end time as clock time
-                            let end_time = chrono::Local::now() + chrono::Duration::seconds((duration - cur_time) as i64);
-                            te2.set_text(&format!("ends {}", end_time.format("%H:%M")));
-                        });
-                        return glib::ControlFlow::Continue;
+                         let d2 = desc2.clone();
+                         let s2 = seeker2.clone();
+                         let tc2 = time_cur2.clone();
+                         let tr2 = time_rem2.clone();
+                         let te2 = time_ends2.clone();
+                         let sh2 = seek_hint_clone.clone();
+                         glib::idle_add_local_once(move || {
+                             t2.set_markup(&format!("<big><b>{}</b></big>", label));
+                             d2.set_text(&desc);
+                             s2.set_value(percent);
+                             sh2.set_label("👆 tap to seek");
+                             tc2.set_text(&format_time(cur_time));
+                             tr2.set_text(&format!("-{}", format_time(duration - cur_time)));
+                             // Calculate end time as clock time
+                             let end_time = chrono::Local::now() + chrono::Duration::seconds((duration - cur_time) as i64);
+                             te2.set_text(&format!("ends {}", end_time.format("%H:%M")));
+                         });
+                         return glib::ControlFlow::Continue;
                     }
                 }
             }
