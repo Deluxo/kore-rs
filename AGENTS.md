@@ -10,7 +10,13 @@ This document provides guidance for AI agents working on the Korers codebase.
 
 ```
 src/
-├── main.rs          # Application entry point
+├── main.rs          # Application entry point (declarative flow)
+├── app.rs           # App struct, effect container, builder chain
+├── effects/         # Effect traits and implementations
+│   ├── mod.rs       # Trait definitions
+│   ├── gtk.rs       # UI operations
+│   ├── discovery.rs # SSDP discovery
+│   └── kodi.rs      # Kodi client operations
 ├── kodi/            # Kodi JSON-RPC client
 │   ├── client.rs    # HTTP client for Kodi API
 │   ├── discovery.rs # SSDP/UDP host discovery
@@ -28,12 +34,50 @@ src/
 
 ## Key Conventions
 
+### Main Entry Point Pattern
+
+The `main.rs` should read like English - a declarative specification of app flow. Use the builder pattern:
+
+```rust
+fn main() {
+    App::new()
+        .init_logging()
+        .load_hosts()
+        .show_window()
+        .show_host_selection()
+        .run();
+}
+```
+
+The `App` struct lives in `app.rs` and holds the effect container:
+
+```rust
+pub struct App {
+    effects: Effects,
+}
+
+struct Effects {
+    host_manager: HostManager,
+    discovery: DiscoveryService,
+}
+
+impl App {
+    pub fn new() -> Self { ... }
+    pub fn init_logging(self) -> Self { ... }
+    pub fn load_hosts(self) -> Self { ... }
+    pub fn show_window(self) -> Self { ... }
+    pub fn show_host_selection(self) -> Self { ... }
+    pub fn run(self) { gtk::main(); }
+}
+```
+
 ### Relm4 Components
 - Use `#[relm4::component]` macro for components
 - Define `Model`, `Msg` (input), and `Widgets` structs
 - Use `view!` macro for declarative UI definition
 - Message naming: `ComponentNameMsg::ActionName`
 - Use `ComponentSender<Model>` for emitting outputs
+- **State lives in Model** - the Relm4 component manages all app state
 
 ### Async Operations
 - All Kodi API calls are async (Tokio)
@@ -179,7 +223,7 @@ GTK widgets are NOT thread-safe. Critical rules:
 
 ### Simple UI Approach
 
-For this project, the simplest pattern is building the UI directly in `main.rs`:
+For complex UIs, build the UI in `app.rs` or a Relm4 component:
 
 ```rust
 let app = Application::builder()
@@ -198,6 +242,31 @@ app.connect_activate(|app| {
     // Access widgets via cloned references in callbacks
 });
 ```
+
+See `src/app.rs` for the effect container pattern.
+
+### Async Operations in Relm4
+
+All Kodi API calls are async. Use `Command::future` to run async operations:
+
+```rust
+use relm4::Command;
+
+fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>) {
+    match msg {
+        Msg::Discover => {
+            let fut = async_discovery();
+            Command::future(fut.map(|hosts| Msg::DiscoveryComplete(Ok(hosts))));
+        }
+        Msg::Connect(host) => {
+            let fut = async_connect(host);
+            Command::future(fut.map(|result| Msg::ConnectionComplete(result)));
+        }
+    }
+}
+```
+
+Effects are dispatched via the `effects/` module. See `src/effects/mod.rs` for trait definitions.
 
 ### SSDP/UDP Discovery
 
