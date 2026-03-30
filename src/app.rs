@@ -1,5 +1,7 @@
 use gtk::prelude::*;
 use gtk::Application;
+use gtk::glib;
+use gtk::pango;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -8,6 +10,8 @@ use crate::host::manager::HostManager;
 use crate::kodi::KodiClient;
 use crate::kodi::client::InputAction;
 use crate::kodi::discovery::DiscoveryService;
+use crate::kodi::types::PlayerTime;
+use chrono::Local;
 
 pub struct App {
     app: Application,
@@ -343,24 +347,97 @@ impl Default for App { fn default() -> Self { Self::new() } }
 fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 8);
     box_.set_margin_start(12); box_.set_margin_end(12); box_.set_margin_top(12); box_.set_margin_bottom(12);
-    box_.set_hexpand(true);
+    box_.set_hexpand(true); box_.set_vexpand(true);
 
+    // Poster (aspect ratio box)
+    let poster = gtk::AspectFrame::new(0.5, 0.5, 0.666, false);
+    poster.set_hexpand(false);
+    let poster_image = gtk::Image::from_icon_name("media-video");
+    poster_image.set_icon_size(gtk::IconSize::Large);
+    poster.set_child(Some(&poster_image));
+    box_.append(&poster);
+
+    // Title
     let title = gtk::Label::new(Some("<big><b>No media playing</b></big>"));
     title.set_halign(gtk::Align::Center);
     title.set_use_markup(true);
+    title.set_hexpand(true);
+    title.set_ellipsize(pango::EllipsizeMode::End);
     box_.append(&title);
 
-    let artist = gtk::Label::new(Some(""));
-    artist.set_halign(gtk::Align::Center);
-    box_.append(&artist);
+    // Description (artist / show info)
+    let description = gtk::Label::new(Some(""));
+    description.set_halign(gtk::Align::Center);
+    description.set_hexpand(true);
+    description.set_ellipsize(pango::EllipsizeMode::End);
+    box_.append(&description);
 
-    let transport = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    transport.set_halign(gtk::Align::Center);
+    // Seeker
+    let seeker_adj = gtk::Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
+    let seeker_adj_clone = seeker_adj.clone();
+    let seeker = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
+    seeker.set_hexpand(true);
+    seeker.set_draw_value(false);
+    
+    // For seek - store current player info
+    let player_info: Rc<RefCell<Option<(i32, i64)>>> = Rc::new(RefCell::new(None));
+    let player_info_seek = player_info.clone();
+    let client_seek = client.clone();
+    
+    // Track last seek time to debounce
+    let last_seek_time: Rc<RefCell<std::time::Instant>> = Rc::new(RefCell::new(std::time::Instant::now()));
+    let last_seek_clone = last_seek_time.clone();
+    
+    // Use adjustment's value-changed - with debounce
+    let client_adj = client.clone();
+    let player_info_adj = player_info.clone();
+    seeker_adj.connect_value_changed(move |_| {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(*last_seek_clone.borrow()).as_millis();
+        if elapsed > 500 {
+            *last_seek_clone.borrow_mut() = now;
+            let percent = seeker_adj_clone.value();
+            if let Some((player_id, _)) = *player_info_adj.borrow() {
+                if let Some(ref c) = *client_adj.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.seek_percentage(player_id, percent));
+                }
+            }
+        }
+    });
+    
+    box_.append(&seeker);
 
-    let prev = gtk::Button::with_label("⏮");
-    let play = gtk::Button::with_label("▶/⏸");
-    let stop = gtk::Button::with_label("⏹");
-    let next = gtk::Button::with_label("⏭");
+    // Time labels: current | remaining | ends at
+    let time_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    time_box.set_hexpand(true);
+    let time_current = gtk::Label::new(Some("0:00"));
+    time_current.set_halign(gtk::Align::Start);
+    time_current.set_hexpand(true);
+    
+    let time_remaining = gtk::Label::new(Some("-0:00"));
+    time_remaining.set_halign(gtk::Align::Center);
+    time_remaining.set_hexpand(true);
+    
+    let time_ends = gtk::Label::new(Some("ends 0:00"));
+    time_ends.set_halign(gtk::Align::End);
+    time_ends.set_hexpand(true);
+    
+    time_box.append(&time_current);
+    time_box.append(&time_remaining);
+    time_box.append(&time_ends);
+    box_.append(&time_box);
+
+    // Transport controls
+    let transport = gtk::Grid::new();
+    transport.set_column_homogeneous(true);
+    transport.set_row_homogeneous(true);
+    transport.set_hexpand(true);
+
+    let prev = gtk::Button::builder().label("⏮").hexpand(true).vexpand(true).build();
+    let play = gtk::Button::builder().label("▶/⏸").hexpand(true).vexpand(true).build();
+    let stop = gtk::Button::builder().label("⏹").hexpand(true).vexpand(true).build();
+    let next = gtk::Button::builder().label("⏭").hexpand(true).vexpand(true).build();
 
     let c = client.clone();
     prev.connect_clicked(move |_| transport_action(&c, "previous"));
@@ -371,10 +448,124 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let c = client.clone();
     next.connect_clicked(move |_| transport_action(&c, "next"));
 
-    transport.append(&prev); transport.append(&play); transport.append(&stop); transport.append(&next);
+    transport.attach(&prev, 0, 0, 1, 1);
+    transport.attach(&play, 1, 0, 1, 1);
+    transport.attach(&stop, 2, 0, 1, 1);
+    transport.attach(&next, 3, 0, 1, 1);
     box_.append(&transport);
 
+    // Polling
+    let title_clone = title.clone();
+    let desc_clone = description.clone();
+    let seeker_clone = seeker.clone();
+    let time_cur_clone = time_current.clone();
+    let time_rem_clone = time_remaining.clone();
+    let time_ends_clone = time_ends.clone();
+    let player_info_poll = player_info.clone();
+    let client_poll = client.clone();
+    glib::source::timeout_add_seconds_local(2, move || {
+        let title2 = title_clone.clone();
+        let desc2 = desc_clone.clone();
+        let seeker2 = seeker_clone.clone();
+        let time_cur2 = time_cur_clone.clone();
+        let time_rem2 = time_rem_clone.clone();
+        let time_ends2 = time_ends_clone.clone();
+        
+        if let Some(ref c) = *client_poll.borrow() {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let players = rt.block_on(c.get_active_players());
+            if let Ok(players) = players {
+                if let Some(p) = players.first() {
+                    tracing::debug!("  player_id: {}", p.playerid);
+                    let item = rt.block_on(c.get_current_item(p.playerid));
+                    let props = rt.block_on(c.get_player_properties(p.playerid));
+                    
+                    // Store player info for seek
+                    if let Ok(ref props_ok) = props {
+                        let dur = props_ok.totaltime.to_seconds();
+                        player_info_poll.replace(Some((p.playerid, dur)));
+                    }
+                    
+                    if let Ok(item) = item {
+                        let label = item.title.clone()
+                            .or(item.label.clone())
+                            .or(item.file.clone())
+                            .unwrap_or_else(|| "Playing".to_string());
+                        
+                        let mut desc_parts = Vec::new();
+                        if let Some(artist) = item.artist {
+                            desc_parts.push(artist.join(", "));
+                        }
+                        if let Some(album) = item.album {
+                            desc_parts.push(album);
+                        }
+                        if let Some(show) = item.showtitle {
+                            if let (Some(season), Some(episode)) = (item.season, item.episode) {
+                                desc_parts.push(format!("S{:02}E{:02}", season, episode));
+                            }
+                            desc_parts.push(show);
+                        }
+                        let desc = desc_parts.join(" • ");
+                        
+                        let (cur_time, duration, percent): (i64, i64, f64) = {
+                            match props {
+                                Ok(p) => {
+                                    let ct = p.time.to_seconds();
+                                    let dur = p.totaltime.to_seconds();
+                                    let pct = if dur > 0 { (ct as f64 / dur as f64) * 100.0 } else { 50.0 };
+                                    (ct, dur, pct.clamp(0.0, 100.0))
+                                }
+                                Err(e) => {
+                                    eprintln!("SEEKER: props error: {:?}", e);
+                                    (0, 0, 50.0)
+                                }
+                            }
+                        };
+                        
+                        tracing::debug!("NOW PLAYING: label={}, time={}/{}", label, cur_time, duration);
+                        
+                        let t2 = title2.clone();
+                        let d2 = desc2.clone();
+                        let s2 = seeker2.clone();
+                        let tc2 = time_cur2.clone();
+                        let tr2 = time_rem2.clone();
+                        let te2 = time_ends2.clone();
+                        glib::idle_add_local_once(move || {
+                            t2.set_markup(&format!("<big><b>{}</b></big>", label));
+                            d2.set_text(&desc);
+                            s2.set_value(percent);
+                            tc2.set_text(&format_time(cur_time));
+                            tr2.set_text(&format!("-{}", format_time(duration - cur_time)));
+                            // Calculate end time as clock time
+                            let end_time = chrono::Local::now() + chrono::Duration::seconds((duration - cur_time) as i64);
+                            te2.set_text(&format!("ends {}", end_time.format("%H:%M")));
+                        });
+                        return glib::ControlFlow::Continue;
+                    }
+                }
+            }
+        }
+        let t2 = title2.clone();
+        let d2 = desc2.clone();
+        glib::idle_add_local_once(move || {
+            t2.set_markup("<big><b>No media playing</b></big>");
+            d2.set_text("");
+        });
+        glib::ControlFlow::Continue
+    });
+
     box_
+}
+
+fn format_time(secs: i64) -> String {
+    let hours = secs / 3600;
+    let mins = (secs % 3600) / 60;
+    let s = secs % 60;
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, mins, s)
+    } else {
+        format!("{}:{:02}", mins, s)
+    }
 }
 
 fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {

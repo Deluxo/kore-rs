@@ -39,6 +39,7 @@ pub struct PlayerItem {
     pub id: i32,
     pub r#type: String,
     pub title: Option<String>,
+    pub label: Option<String>,
     pub artist: Option<Vec<String>>,
     pub album: Option<String>,
     pub showtitle: Option<String>,
@@ -55,11 +56,25 @@ pub struct PlayerItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerProperty {
     pub speed: i32,
-    pub time: i64,
-    pub duration: i64,
+    pub time: PlayerTime,
+    pub totaltime: PlayerTime,
     pub playlistid: i32,
     pub currentaudiostream: Option<AudioStream>,
     pub subtitleenabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerTime {
+    pub hours: i32,
+    pub minutes: i32,
+    pub seconds: i32,
+    pub milliseconds: i32,
+}
+
+impl PlayerTime {
+    pub fn to_seconds(&self) -> i64 {
+        (self.hours * 3600 + self.minutes * 60 + self.seconds) as i64
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

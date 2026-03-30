@@ -189,7 +189,7 @@ impl KodiClient {
                 properties: vec![
                     "speed".to_string(),
                     "time".to_string(),
-                    "duration".to_string(),
+                    "totaltime".to_string(),
                     "playlistid".to_string(),
                     "currentaudiostream".to_string(),
                     "subtitleenabled".to_string(),
@@ -298,14 +298,36 @@ impl KodiClient {
 
     pub async fn seek(&self, player_id: i32, time_secs: i64) -> Result<PlayerProperty, ClientError> {
         #[derive(Serialize)]
+        struct SeekValue {
+            seconds: i64,
+        }
+        #[derive(Serialize)]
         struct Params {
             playerid: i32,
-            value: i64,
+            value: SeekValue,
         }
 
         self.call(
             JsonRpcRequest::new("Player.Seek")
-                .with_params(Params { playerid: player_id, value: time_secs }),
+                .with_params(Params { playerid: player_id, value: SeekValue { seconds: time_secs } }),
+        )
+        .await
+    }
+
+    pub async fn seek_percentage(&self, player_id: i32, percentage: f64) -> Result<PlayerProperty, ClientError> {
+        #[derive(Serialize)]
+        struct SeekValue {
+            percentage: f64,
+        }
+        #[derive(Serialize)]
+        struct Params {
+            playerid: i32,
+            value: SeekValue,
+        }
+
+        self.call(
+            JsonRpcRequest::new("Player.Seek")
+                .with_params(Params { playerid: player_id, value: SeekValue { percentage } }),
         )
         .await
     }
