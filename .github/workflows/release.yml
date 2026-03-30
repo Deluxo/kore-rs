@@ -32,13 +32,14 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       # 4️⃣ Install system dependencies for GTK (x86_64 only)
-      - name: Install GTK dependencies
+      - name: Install GTK & GLib dependencies
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt update
           sudo apt install -y \
-            libgtk-4-dev \
+            pkg-config \
             libglib2.0-dev \
+            libgtk-4-dev \
             libpango1.0-dev \
             libcairo2-dev \
             libgdk-pixbuf-2.0-dev \
