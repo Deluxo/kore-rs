@@ -39,6 +39,7 @@ impl KodiClient {
         Self {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
+                .connect_timeout(std::time::Duration::from_secs(5))
                 .build()
                 .expect("Failed to create HTTP client"),
             base_url: base_url.into(),

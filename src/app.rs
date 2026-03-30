@@ -1,12 +1,15 @@
 use gtk::prelude::*;
 use gtk::Application;
 
-use crate::effects::Effects;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::host::{Host, manager::HostManager};
 use crate::kodi::discovery::DiscoveryService;
+use crate::kodi::client::InputAction;
+use crate::kodi::KodiClient;
 
 pub struct App {
-    effects: Effects,
     app: Application,
     hosts: Vec<Host>,
 }
@@ -18,7 +21,6 @@ impl App {
             .build();
 
         Self {
-            effects: Effects::new(),
             app,
             hosts: Vec::new(),
         }
@@ -109,8 +111,23 @@ impl App {
                 .hexpand(true)
                 .build();
 
+            let edit_button = gtk::Button::builder()
+                .label("Edit")
+                .build();
+
+            let delete_button = gtk::Button::builder()
+                .label("Delete")
+                .build();
+
             let status_label = gtk::Label::builder()
                 .label("Ready")
+                .halign(gtk::Align::Start)
+                .margin_start(8)
+                .margin_end(8)
+                .build();
+
+            let connection_status = gtk::Label::builder()
+                .label("Disconnected")
                 .halign(gtk::Align::Start)
                 .margin_start(8)
                 .margin_end(8)
@@ -129,22 +146,424 @@ impl App {
             let welcome_label = gtk::Label::new(Some("Select a host to get started"));
             main_stack.add_titled(&welcome_label, Some("welcome"), "Welcome");
 
-            let remote_label = gtk::Label::new(Some("Remote Control"));
-            main_stack.add_titled(&remote_label, Some("remote"), "Remote");
+            // Build Remote Control UI
+            let remote_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(16)
+                .hexpand(true)
+                .vexpand(true)
+                .build();
 
-            let now_playing_label = gtk::Label::new(Some("Now Playing"));
-            main_stack.add_titled(&now_playing_label, Some("nowplaying"), "Now Playing");
+            // D-pad section
+            let dpad_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(4)
+                .build();
+
+            let dpad_up = gtk::Button::builder()
+                .label("▲")
+                .build();
+            let dpad_row = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(4)
+                .build();
+            let dpad_left = gtk::Button::builder()
+                .label("◀")
+                .build();
+            let dpad_select = gtk::Button::builder()
+                .label("OK")
+                .build();
+            let dpad_right = gtk::Button::builder()
+                .label("▶")
+                .build();
+            let dpad_down = gtk::Button::builder()
+                .label("▼")
+                .build();
+
+            dpad_row.append(&dpad_left);
+            dpad_row.append(&dpad_select);
+            dpad_row.append(&dpad_right);
+            dpad_box.append(&dpad_up);
+            dpad_box.append(&dpad_row);
+            dpad_box.append(&dpad_down);
+
+            // Navigation buttons
+            let nav_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(8)
+                .build();
+            let back_btn = gtk::Button::builder()
+                .label("Back")
+                .build();
+            let home_btn = gtk::Button::builder()
+                .label("Home")
+                .build();
+            let info_btn = gtk::Button::builder()
+                .label("Info")
+                .build();
+            nav_box.append(&back_btn);
+            nav_box.append(&home_btn);
+            nav_box.append(&info_btn);
+
+            // Transport controls
+            let transport_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(8)
+                .build();
+            let prev_btn = gtk::Button::builder()
+                .label("⏮")
+                .build();
+            let play_btn = gtk::Button::builder()
+                .label("▶/⏸")
+                .build();
+            let stop_btn = gtk::Button::builder()
+                .label("⏹")
+                .build();
+            let next_btn = gtk::Button::builder()
+                .label("⏭")
+                .build();
+            transport_box.append(&prev_btn);
+            transport_box.append(&play_btn);
+            transport_box.append(&stop_btn);
+            transport_box.append(&next_btn);
+
+            // Volume controls
+            let volume_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(8)
+                .build();
+            let mute_btn = gtk::Button::builder()
+                .label("🔇")
+                .build();
+            let vol_down_btn = gtk::Button::builder()
+                .label("🔉")
+                .build();
+            let vol_label = gtk::Label::new(Some("Volume"));
+            let vol_up_btn = gtk::Button::builder()
+                .label("🔊")
+                .build();
+            volume_box.append(&mute_btn);
+            volume_box.append(&vol_down_btn);
+            volume_box.append(&vol_label);
+            volume_box.append(&vol_up_btn);
+
+            remote_box.append(&dpad_box);
+            remote_box.append(&nav_box);
+            remote_box.append(&transport_box);
+            remote_box.append(&volume_box);
+
+            main_stack.add_titled(&remote_box, Some("remote"), "Remote");
+
+            // Store for connected client
+            let client: Rc<RefCell<Option<KodiClient>>> = Rc::new(RefCell::new(None));
+
+            // Wire up D-pad buttons
+            let client_for_dpad = client.clone();
+            dpad_up.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_dpad.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Up));
+                }
+            });
+
+            let client_for_dpad = client.clone();
+            dpad_down.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_dpad.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Down));
+                }
+            });
+
+            let client_for_dpad = client.clone();
+            dpad_left.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_dpad.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Left));
+                }
+            });
+
+            let client_for_dpad = client.clone();
+            dpad_right.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_dpad.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Right));
+                }
+            });
+
+            let client_for_dpad = client.clone();
+            dpad_select.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_dpad.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Select));
+                }
+            });
+
+            // Navigation buttons
+            let client_for_nav = client.clone();
+            back_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_nav.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Back));
+                }
+            });
+
+            let client_for_nav = client.clone();
+            home_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_nav.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Home));
+                }
+            });
+
+            let client_for_nav = client.clone();
+            info_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_nav.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.input(InputAction::Info));
+                }
+            });
+
+            // Transport controls
+            let client_for_transport = client.clone();
+            play_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_transport.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.play_pause(player.playerid));
+                        }
+                    }
+                }
+            });
+
+            let client_for_transport = client.clone();
+            stop_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_transport.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.stop(player.playerid));
+                        }
+                    }
+                }
+            });
+
+            let client_for_transport = client.clone();
+            prev_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_transport.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.go_to(player.playerid, "previous"));
+                        }
+                    }
+                }
+            });
+
+            let client_for_transport = client.clone();
+            next_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_transport.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.go_to(player.playerid, "next"));
+                        }
+                    }
+                }
+            });
+
+            // Volume controls
+            let client_for_vol = client.clone();
+            vol_up_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_vol.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(props) = rt.block_on(c.get_application_properties()) {
+                        let new_vol = (props.volume + 10).min(100);
+                        let _ = rt.block_on(c.set_volume(new_vol));
+                    }
+                }
+            });
+
+            let client_for_vol = client.clone();
+            vol_down_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_vol.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(props) = rt.block_on(c.get_application_properties()) {
+                        let new_vol = (props.volume - 10).max(0);
+                        let _ = rt.block_on(c.set_volume(new_vol));
+                    }
+                }
+            });
+
+            let client_for_vol = client.clone();
+            mute_btn.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_vol.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(props) = rt.block_on(c.get_application_properties()) {
+                        let _ = rt.block_on(c.set_mute(!props.muted));
+                    }
+                }
+            });
+
+            // Build Now Playing UI
+            let nowplaying_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(16)
+                .hexpand(true)
+                .vexpand(true)
+                .build();
+
+            let np_thumbnail = gtk::Image::from_icon_name("audio-x-generic");
+
+            let np_title = gtk::Label::new(Some("No media playing"));
+            np_title.set_markup("<big><b>No media playing</b></big>");
+            np_title.set_halign(gtk::Align::Center);
+
+            let np_artist = gtk::Label::new(Some(""));
+            np_artist.set_halign(gtk::Align::Center);
+
+            let np_album = gtk::Label::new(Some(""));
+            np_album.set_halign(gtk::Align::Center);
+
+            let np_progress = gtk::Scale::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .hexpand(true)
+                .build();
+            np_progress.set_range(0.0, 100.0);
+            np_progress.set_value(0.0);
+
+            let np_time = gtk::Label::new(Some("0:00 / 0:00"));
+            np_time.set_halign(gtk::Align::Center);
+
+            // Transport controls for Now Playing
+            let np_transport = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(16)
+                .build();
+            let np_prev = gtk::Button::builder().label("⏮").build();
+            let np_play = gtk::Button::builder().label("▶/⏸").build();
+            let np_stop = gtk::Button::builder().label("⏹").build();
+            let np_next = gtk::Button::builder().label("⏭").build();
+            np_transport.append(&np_prev);
+            np_transport.append(&np_play);
+            np_transport.append(&np_stop);
+            np_transport.append(&np_next);
+
+            nowplaying_box.append(&np_thumbnail);
+            nowplaying_box.append(&np_title);
+            nowplaying_box.append(&np_artist);
+            nowplaying_box.append(&np_album);
+            nowplaying_box.append(&np_progress);
+            nowplaying_box.append(&np_time);
+            nowplaying_box.append(&np_transport);
+
+            main_stack.add_titled(&nowplaying_box, Some("nowplaying"), "Now Playing");
+
+            // Wire up Now Playing transport buttons
+            let client_for_np = client.clone();
+            np_play.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_np.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.play_pause(player.playerid));
+                        }
+                    }
+                }
+            });
+
+            let client_for_np = client.clone();
+            np_stop.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_np.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.stop(player.playerid));
+                        }
+                    }
+                }
+            });
+
+            let client_for_np = client.clone();
+            np_prev.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_np.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.go_to(player.playerid, "previous"));
+                        }
+                    }
+                }
+            });
+
+            let client_for_np = client.clone();
+            np_next.connect_clicked(move |_| {
+                if let Some(ref c) = *client_for_np.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    if let Ok(players) = rt.block_on(c.get_active_players()) {
+                        if let Some(player) = players.first() {
+                            let _ = rt.block_on(c.go_to(player.playerid, "next"));
+                        }
+                    }
+                }
+            });
 
             let settings_label = gtk::Label::new(Some("Settings"));
             main_stack.add_titled(&settings_label, Some("settings"), "Settings");
 
+            // Host selection handler - auto-connect when host is clicked
+            let hosts_for_selection = hosts.clone();
+            let connection_status_clone = connection_status.clone();
+            let main_stack_clone = main_stack.clone();
+            let client_clone = client.clone();
+            
+            host_list.connect_row_selected(move |_list, row| {
+                if let Some(row) = row {
+                    let index = row.index() as usize;
+                    if let Some(host) = hosts_for_selection.get(index) {
+                        connection_status_clone.set_label("Connecting...");
+                        
+                        let url = host.url();
+                        tracing::info!("Attempting to connect to URL: {}", url);
+                        let new_client = KodiClient::from_url(&url);
+                        
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        match rt.block_on(new_client.ping()) {
+                            Ok(response) => {
+                                tracing::info!("Connected to {}: {}", host.name, response);
+                                connection_status_clone.set_label(&format!("Connected to {}", host.name));
+                                *client_clone.borrow_mut() = Some(new_client);
+                                main_stack_clone.set_visible_child_name("remote");
+                            }
+                            Err(e) => {
+                                tracing::error!("Connection failed: {:?}", e);
+                                let error_detail = format!("{:?}", e);
+                                connection_status_clone.set_label(&format!("Error: {}", e));
+                                let debug_info = format!(
+                                    "Failed to connect to {}\n\nURL: {}\n\nError: {}\n\n\
+                                    Possible causes:\n\
+                                    - Wrong IP address or port\n\
+                                    - Firewall blocking the connection\n\
+                                    - Kodi not running or not enabled for HTTP control",
+                                    host.name, url, error_detail
+                                );
+                                show_error_dialog(&debug_info);
+                            }
+                        }
+                    }
+                }
+            });
+
             sidebar.append(&hosts_label);
             sidebar.append(&host_list);
             sidebar.append(&button_box);
+            sidebar.append(&connection_status);
             sidebar.append(&status_label);
 
             button_box.append(&discover_button);
             button_box.append(&add_button);
+            button_box.append(&edit_button);
+            button_box.append(&delete_button);
 
             main_box.append(&sidebar);
             main_box.append(&sep);
@@ -156,12 +575,13 @@ impl App {
             window.set_child(Some(&vbox));
 
             let host_list_for_discovery = host_list.clone();
+            let status_label_for_discovery = status_label.clone();
             let status_label_for_add = status_label.clone();
             
             discover_button.connect_clicked(move |btn| {
                 let host_list = host_list_for_discovery.clone();
                 
-                status_label.set_label("Discovering...");
+                status_label_for_discovery.set_label("Discovering...");
                 btn.set_sensitive(false);
                 
                 let discovery = DiscoveryService::new();
@@ -189,11 +609,11 @@ impl App {
                         } else {
                             "No hosts found".to_string()
                         };
-                        status_label.set_label(&status);
+                        status_label_for_discovery.set_label(&status);
                     }
                     Err(e) => {
                         tracing::error!("Discovery failed: {}", e);
-                        status_label.set_label(&format!("Error: {}", e));
+                        status_label_for_discovery.set_label(&format!("Error: {}", e));
                     }
                 }
                 btn.set_sensitive(true);
@@ -227,6 +647,92 @@ impl App {
                     });
                     
                     dialog.show();
+                }
+            });
+
+            // Edit button - edit selected host
+            let hosts_for_edit = hosts.clone();
+            let host_list_for_edit = host_list.clone();
+            let status_label_for_edit = status_label.clone();
+            
+            edit_button.connect_clicked(move |_| {
+                // Get selected row
+                if let Some(selected_row) = host_list_for_edit.selected_row() {
+                    let index = selected_row.index() as usize;
+                    if let Some(host) = hosts_for_edit.get(index) {
+                        if let Some((dialog, name_entry, address_entry, port_spin)) = show_edit_host_dialog(host) {
+                            let host_list = host_list_for_edit.clone();
+                            let status_label = status_label_for_edit.clone();
+                            let original_host = host.clone();
+                            
+                            dialog.connect_response(move |dialog, response| {
+                                if response == gtk::ResponseType::Ok {
+                                    let name = name_entry.text().to_string();
+                                    let address = address_entry.text().to_string();
+                                    let port = port_spin.value() as u16;
+                                    
+                                    if !name.is_empty() && !address.is_empty() {
+                                        let updated_host = Host::new(name.clone(), address, port);
+                                        
+                                        // Update in manager
+                                        if let Ok(mut manager) = HostManager::new() {
+                                            let _ = manager.remove_host(&original_host.id);
+                                            let _ = manager.add_host(updated_host.clone());
+                                        }
+                                        
+                                        // Refresh list - rebuild all hosts
+                                        while let Some(child) = host_list.first_child() {
+                                            host_list.remove(&child);
+                                        }
+                                        if let Ok(manager) = HostManager::new() {
+                                            for h in manager.hosts() {
+                                                add_host_to_list(&host_list, h);
+                                            }
+                                        }
+                                        
+                                        status_label.set_label(&format!("Updated {}", name));
+                                    }
+                                }
+                                dialog.destroy();
+                            });
+                            
+                            dialog.show();
+                        }
+                    }
+                } else {
+                    show_error_dialog("Please select a host to edit.");
+                }
+            });
+
+            // Delete button - delete selected host
+            let hosts_for_delete = hosts.clone();
+            let host_list_for_delete = host_list.clone();
+            let status_label_for_delete = status_label.clone();
+            
+            delete_button.connect_clicked(move |_| {
+                if let Some(selected_row) = host_list_for_delete.selected_row() {
+                    let index = selected_row.index() as usize;
+                    if let Some(host) = hosts_for_delete.get(index) {
+                        // Remove from manager
+                        if let Ok(mut manager) = HostManager::new() {
+                            let name = host.name.clone();
+                            let _ = manager.remove_host(&host.id);
+                            
+                            // Refresh list
+                            while let Some(child) = host_list_for_delete.first_child() {
+                                host_list_for_delete.remove(&child);
+                            }
+                            if let Ok(manager) = HostManager::new() {
+                                for h in manager.hosts() {
+                                    add_host_to_list(&host_list_for_delete, h);
+                                }
+                            }
+                            
+                            status_label_for_delete.set_label(&format!("Deleted {}", name));
+                        }
+                    }
+                } else {
+                    show_error_dialog("Please select a host to delete.");
                 }
             });
 
@@ -324,4 +830,78 @@ fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::S
     dialog.add_button("Add", gtk::ResponseType::Ok);
 
     Some((dialog, name_entry, address_entry, port_spin))
+}
+
+fn show_edit_host_dialog(host: &Host) -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton)> {
+    let dialog = gtk::Dialog::new();
+    dialog.set_title(Some("Edit Host"));
+    dialog.set_modal(true);
+    dialog.set_default_size(350, 200);
+
+    let content = dialog.content_area();
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_spacing(12);
+
+    let form = gtk::Grid::new();
+    form.set_row_spacing(8);
+    form.set_column_spacing(8);
+
+    let name_label = gtk::Label::new(Some("Name:"));
+    name_label.set_halign(gtk::Align::End);
+    let name_entry = gtk::Entry::new();
+    name_entry.set_text(&host.name);
+
+    let address_label = gtk::Label::new(Some("Address:"));
+    address_label.set_halign(gtk::Align::End);
+    let address_entry = gtk::Entry::new();
+    address_entry.set_text(&host.address);
+
+    let port_label = gtk::Label::new(Some("Port:"));
+    port_label.set_halign(gtk::Align::End);
+    let port_adjustment = gtk::Adjustment::new(host.port as f64, 1.0, 65535.0, 1.0, 10.0, 0.0);
+    let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
+
+    form.attach(&name_label, 0, 0, 1, 1);
+    form.attach(&name_entry, 1, 0, 1, 1);
+    form.attach(&address_label, 0, 1, 1, 1);
+    form.attach(&address_entry, 1, 1, 1, 1);
+    form.attach(&port_label, 0, 2, 1, 1);
+    form.attach(&port_spin, 1, 2, 1, 1);
+
+    content.append(&form);
+
+    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+    dialog.add_button("Save", gtk::ResponseType::Ok);
+
+    Some((dialog, name_entry, address_entry, port_spin))
+}
+
+fn show_error_dialog(message: &str) {
+    let dialog = gtk::Dialog::new();
+    dialog.set_title(Some("Connection Error"));
+    dialog.set_modal(true);
+    dialog.set_default_size(400, 150);
+
+    let content = dialog.content_area();
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+
+    let label = gtk::Label::new(Some(message));
+    label.set_wrap(true);
+    label.set_halign(gtk::Align::Start);
+    label.set_valign(gtk::Align::Start);
+    content.append(&label);
+
+    dialog.add_button("OK", gtk::ResponseType::Ok);
+
+    dialog.connect_response(|dialog, _| {
+        dialog.destroy();
+    });
+
+    dialog.show();
 }
