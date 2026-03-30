@@ -3,11 +3,11 @@ use gtk::Application;
 
 use crate::effects::Effects;
 use crate::host::{Host, manager::HostManager};
+use crate::kodi::discovery::DiscoveryService;
 
 pub struct App {
     effects: Effects,
     app: Application,
-    window: Option<gtk::ApplicationWindow>,
     hosts: Vec<Host>,
 }
 
@@ -20,7 +20,6 @@ impl App {
         Self {
             effects: Effects::new(),
             app,
-            window: None,
             hosts: Vec::new(),
         }
     }
@@ -44,7 +43,9 @@ impl App {
     }
 
     pub fn show_window(self) -> Self {
-        self.app.connect_activate(|app| {
+        let hosts = self.hosts.clone();
+        
+        self.app.connect_activate(move |app| {
             let window = gtk::ApplicationWindow::builder()
                 .application(app)
                 .title("Korers - Kodi Remote")
@@ -85,6 +86,10 @@ impl App {
                 .margin_start(8)
                 .margin_end(8)
                 .build();
+
+            for host in &hosts {
+                add_host_to_list(&host_list, host);
+            }
 
             let button_box = gtk::Box::builder()
                 .orientation(gtk::Orientation::Horizontal)
@@ -149,6 +154,82 @@ impl App {
             vbox.append(&main_box);
 
             window.set_child(Some(&vbox));
+
+            let host_list_for_discovery = host_list.clone();
+            let status_label_for_add = status_label.clone();
+            
+            discover_button.connect_clicked(move |btn| {
+                let host_list = host_list_for_discovery.clone();
+                
+                status_label.set_label("Discovering...");
+                btn.set_sensitive(false);
+                
+                let discovery = DiscoveryService::new();
+                match discovery.discover_all(5) {
+                    Ok(discovered) => {
+                        tracing::info!("Discovery found {} hosts", discovered.len());
+                        
+                        for host_info in &discovered {
+                            let host = Host::new(
+                                host_info.name.clone(),
+                                host_info.address.clone(),
+                                host_info.port,
+                            );
+                            
+                            if let Ok(mut manager) = HostManager::new() {
+                                let _ = manager.add_host(host.clone());
+                            }
+                            
+                            add_host_to_list(&host_list, &host);
+                        }
+                        
+                        let host_count = discovered.len();
+                        let status = if host_count > 0 {
+                            format!("Found {} hosts", host_count)
+                        } else {
+                            "No hosts found".to_string()
+                        };
+                        status_label.set_label(&status);
+                    }
+                    Err(e) => {
+                        tracing::error!("Discovery failed: {}", e);
+                        status_label.set_label(&format!("Error: {}", e));
+                    }
+                }
+                btn.set_sensitive(true);
+            });
+
+            let host_list_for_add = host_list.clone();
+            
+            add_button.connect_clicked(move |_| {
+                if let Some((dialog, name_entry, address_entry, port_spin)) = show_add_host_dialog() {
+                    let host_list = host_list_for_add.clone();
+                    let status_label = status_label_for_add.clone();
+                    
+                    dialog.connect_response(move |dialog, response| {
+                        if response == gtk::ResponseType::Ok {
+                            let name = name_entry.text().to_string();
+                            let address = address_entry.text().to_string();
+                            let port = port_spin.value() as u16;
+                            
+                            if !name.is_empty() && !address.is_empty() {
+                                let host = Host::new(name.clone(), address, port);
+                                
+                                add_host_to_list(&host_list, &host);
+                                status_label.set_label(&format!("Added {}", name));
+                                
+                                if let Ok(mut manager) = HostManager::new() {
+                                    let _ = manager.add_host(host);
+                                }
+                            }
+                        }
+                        dialog.destroy();
+                    });
+                    
+                    dialog.show();
+                }
+            });
+
             window.show();
         });
         self
@@ -167,4 +248,80 @@ impl Default for App {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn add_host_to_list(list: &gtk::ListBox, host: &Host) {
+    let row = gtk::ListBoxRow::new();
+    
+    let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    box_.set_margin_start(12);
+    box_.set_margin_end(12);
+    box_.set_margin_top(8);
+    box_.set_margin_bottom(8);
+
+    let icon = gtk::Image::from_icon_name("computer");
+    box_.append(&icon);
+
+    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    
+    let name_label = gtk::Label::new(Some(&host.name));
+    name_label.set_halign(gtk::Align::Start);
+    name_label.set_hexpand(true);
+    vbox.append(&name_label);
+
+    let addr_label = gtk::Label::new(Some(&format!("{}:{}", host.address, host.port)));
+    addr_label.set_halign(gtk::Align::Start);
+    vbox.append(&addr_label);
+
+    box_.append(&vbox);
+
+    row.set_child(Some(&box_));
+    list.append(&row);
+}
+
+fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton)> {
+    let dialog = gtk::Dialog::new();
+    dialog.set_title(Some("Add Host"));
+    dialog.set_modal(true);
+    dialog.set_default_size(350, 200);
+
+    let content = dialog.content_area();
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_spacing(12);
+
+    let form = gtk::Grid::new();
+    form.set_row_spacing(8);
+    form.set_column_spacing(8);
+
+    let name_label = gtk::Label::new(Some("Name:"));
+    name_label.set_halign(gtk::Align::End);
+    let name_entry = gtk::Entry::new();
+    name_entry.set_placeholder_text(Some("Kodi @ 192.168.1.100"));
+
+    let address_label = gtk::Label::new(Some("Address:"));
+    address_label.set_halign(gtk::Align::End);
+    let address_entry = gtk::Entry::new();
+    address_entry.set_placeholder_text(Some("192.168.1.100"));
+
+    let port_label = gtk::Label::new(Some("Port:"));
+    port_label.set_halign(gtk::Align::End);
+    let port_adjustment = gtk::Adjustment::new(8080.0, 1.0, 65535.0, 1.0, 10.0, 0.0);
+    let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
+
+    form.attach(&name_label, 0, 0, 1, 1);
+    form.attach(&name_entry, 1, 0, 1, 1);
+    form.attach(&address_label, 0, 1, 1, 1);
+    form.attach(&address_entry, 1, 1, 1, 1);
+    form.attach(&port_label, 0, 2, 1, 1);
+    form.attach(&port_spin, 1, 2, 1, 1);
+
+    content.append(&form);
+
+    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+    dialog.add_button("Add", gtk::ResponseType::Ok);
+
+    Some((dialog, name_entry, address_entry, port_spin))
 }
