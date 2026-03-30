@@ -2,16 +2,15 @@ use gtk::prelude::*;
 use gtk::Application;
 use gtk::glib;
 use gtk::pango;
+use gtk::{Scale, GestureClick};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::host::Host;
 use crate::host::manager::HostManager;
+use crate::kodi::DiscoveryService;
 use crate::kodi::KodiClient;
 use crate::kodi::client::InputAction;
-use crate::kodi::discovery::DiscoveryService;
-use crate::kodi::types::PlayerTime;
-use chrono::Local;
 
 pub struct App {
     app: Application,
@@ -267,7 +266,7 @@ impl App {
                             content.append(&vb);
                             dialog.show();
 
-                            let host_id = host.id.clone();
+                            let _host_id = host.id.clone();
                             let mgr_resp = mgr_edit.clone();
                             dialog.connect_response(move |dlg, resp| {
                                 if resp == gtk::ResponseType::Accept {
@@ -374,37 +373,28 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
 
     // Seeker
     let seeker_adj = gtk::Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
-    let seeker_adj_clone = seeker_adj.clone();
-    let seeker = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
+    let seeker = Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
     seeker.set_hexpand(true);
     seeker.set_draw_value(false);
     
     // For seek - store current player info
     let player_info: Rc<RefCell<Option<(i32, i64)>>> = Rc::new(RefCell::new(None));
-    let player_info_seek = player_info.clone();
-    let client_seek = client.clone();
     
-    // Track last seek time to debounce
-    let last_seek_time: Rc<RefCell<std::time::Instant>> = Rc::new(RefCell::new(std::time::Instant::now()));
-    let last_seek_clone = last_seek_time.clone();
-    
-    // Use adjustment's value-changed - with debounce
-    let client_adj = client.clone();
-    let player_info_adj = player_info.clone();
-    seeker_adj.connect_value_changed(move |_| {
-        let now = std::time::Instant::now();
-        let elapsed = now.duration_since(*last_seek_clone.borrow()).as_millis();
-        if elapsed > 500 {
-            *last_seek_clone.borrow_mut() = now;
-            let percent = seeker_adj_clone.value();
-            if let Some((player_id, _)) = *player_info_adj.borrow() {
-                if let Some(ref c) = *client_adj.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.seek_percentage(player_id, percent));
-                }
+    // Create click gesture for seek (only fires on user interaction)
+    let gesture = GestureClick::new();
+    let seeker_gesture = gesture.clone();
+    let player_info_gesture = player_info.clone();
+    let client_gesture = client.clone();
+    seeker_gesture.connect_released(move |_, _, _, _| {
+        let percent = seeker_adj.value();
+        if let Some((player_id, _)) = *player_info_gesture.borrow() {
+            if let Some(ref c) = *client_gesture.borrow() {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let _ = rt.block_on(c.seek_percentage(player_id, percent));
             }
         }
     });
+    seeker.add_controller(gesture);
     
     box_.append(&seeker);
 
