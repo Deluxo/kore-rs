@@ -907,6 +907,7 @@ dependencies = [
 name = "korers"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "dirs",
  "dns-sd",

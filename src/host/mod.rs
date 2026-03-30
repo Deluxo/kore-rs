@@ -30,6 +30,26 @@ impl Host {
         }
     }
 
+    pub fn new_with_credentials(
+        name: String,
+        address: String,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Self {
+        Self {
+            id: uuid_simple(),
+            name,
+            address,
+            port,
+            mac_address: None,
+            wol_port: 9,
+            username,
+            password,
+            use_tls: false,
+        }
+    }
+
     pub fn url(&self) -> String {
         let scheme = if self.use_tls { "https" } else { "http" };
         match (&self.username, &self.password) {

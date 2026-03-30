@@ -523,9 +523,9 @@ impl App {
                     if let Some(host) = hosts_for_selection.get(index) {
                         connection_status_clone.set_label("Connecting...");
                         
-                        let url = host.url();
-                        tracing::info!("Attempting to connect to URL: {}", url);
-                        let new_client = KodiClient::from_url(&url);
+                        tracing::info!("Connecting to host: {} at {}:{} with username: {:?}", 
+                            host.name, host.address, host.port, host.username);
+                        let new_client = KodiClient::from_host(host);
                         
                         let rt = tokio::runtime::Runtime::new().unwrap();
                         match rt.block_on(new_client.ping()) {
@@ -540,12 +540,14 @@ impl App {
                                 let error_detail = format!("{:?}", e);
                                 connection_status_clone.set_label(&format!("Error: {}", e));
                                 let debug_info = format!(
-                                    "Failed to connect to {}\n\nURL: {}\n\nError: {}\n\n\
+                                    "Failed to connect to {}\n\n\
+                                    Address: {}:{}\n\n\
+                                    Error: {}\n\n\
                                     Possible causes:\n\
                                     - Wrong IP address or port\n\
                                     - Firewall blocking the connection\n\
                                     - Kodi not running or not enabled for HTTP control",
-                                    host.name, url, error_detail
+                                    host.name, host.address, host.port, error_detail
                                 );
                                 show_error_dialog(&debug_info);
                             }
@@ -622,7 +624,7 @@ impl App {
             let host_list_for_add = host_list.clone();
             
             add_button.connect_clicked(move |_| {
-                if let Some((dialog, name_entry, address_entry, port_spin)) = show_add_host_dialog() {
+                if let Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry)) = show_add_host_dialog() {
                     let host_list = host_list_for_add.clone();
                     let status_label = status_label_for_add.clone();
                     
@@ -631,9 +633,17 @@ impl App {
                             let name = name_entry.text().to_string();
                             let address = address_entry.text().to_string();
                             let port = port_spin.value() as u16;
+                            let username = username_entry.text().to_string();
+                            let password = password_entry.text().to_string();
                             
                             if !name.is_empty() && !address.is_empty() {
-                                let host = Host::new(name.clone(), address, port);
+                                let host = Host::new_with_credentials(
+                                    name.clone(),
+                                    address,
+                                    port,
+                                    if username.is_empty() { None } else { Some(username) },
+                                    if password.is_empty() { None } else { Some(password) },
+                                );
                                 
                                 add_host_to_list(&host_list, &host);
                                 status_label.set_label(&format!("Added {}", name));
@@ -660,7 +670,7 @@ impl App {
                 if let Some(selected_row) = host_list_for_edit.selected_row() {
                     let index = selected_row.index() as usize;
                     if let Some(host) = hosts_for_edit.get(index) {
-                        if let Some((dialog, name_entry, address_entry, port_spin)) = show_edit_host_dialog(host) {
+                        if let Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry)) = show_edit_host_dialog(host) {
                             let host_list = host_list_for_edit.clone();
                             let status_label = status_label_for_edit.clone();
                             let original_host = host.clone();
@@ -670,9 +680,17 @@ impl App {
                                     let name = name_entry.text().to_string();
                                     let address = address_entry.text().to_string();
                                     let port = port_spin.value() as u16;
+                                    let username = username_entry.text().to_string();
+                                    let password = password_entry.text().to_string();
                                     
                                     if !name.is_empty() && !address.is_empty() {
-                                        let updated_host = Host::new(name.clone(), address, port);
+                                        let updated_host = Host::new_with_credentials(
+                                            name.clone(),
+                                            address,
+                                            port,
+                                            if username.is_empty() { None } else { Some(username) },
+                                            if password.is_empty() { None } else { Some(password) },
+                                        );
                                         
                                         // Update in manager
                                         if let Ok(mut manager) = HostManager::new() {
@@ -705,30 +723,41 @@ impl App {
             });
 
             // Delete button - delete selected host
-            let hosts_for_delete = hosts.clone();
             let host_list_for_delete = host_list.clone();
             let status_label_for_delete = status_label.clone();
             
             delete_button.connect_clicked(move |_| {
                 if let Some(selected_row) = host_list_for_delete.selected_row() {
                     let index = selected_row.index() as usize;
-                    if let Some(host) = hosts_for_delete.get(index) {
-                        // Remove from manager
-                        if let Ok(mut manager) = HostManager::new() {
+                    
+                    // Get fresh list of hosts from manager
+                    if let Ok(manager) = HostManager::new() {
+                        let hosts = manager.hosts().to_vec();
+                        if let Some(host) = hosts.get(index) {
                             let name = host.name.clone();
-                            let _ = manager.remove_host(&host.id);
+                            let id = host.id.clone();
                             
-                            // Refresh list
-                            while let Some(child) = host_list_for_delete.first_child() {
-                                host_list_for_delete.remove(&child);
-                            }
-                            if let Ok(manager) = HostManager::new() {
-                                for h in manager.hosts() {
-                                    add_host_to_list(&host_list_for_delete, h);
+                            // Remove from manager
+                            if let Ok(mut mgr) = HostManager::new() {
+                                match mgr.remove_host(&id) {
+                                    Ok(()) => {
+                                        // Refresh list
+                                        while let Some(child) = host_list_for_delete.first_child() {
+                                            host_list_for_delete.remove(&child);
+                                        }
+                                        if let Ok(manager) = HostManager::new() {
+                                            for h in manager.hosts() {
+                                                add_host_to_list(&host_list_for_delete, h);
+                                            }
+                                        }
+                                        status_label_for_delete.set_label(&format!("Deleted {}", name));
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to delete host: {}", e);
+                                        status_label_for_delete.set_label(&format!("Error: {}", e));
+                                    }
                                 }
                             }
-                            
-                            status_label_for_delete.set_label(&format!("Deleted {}", name));
                         }
                     }
                 } else {
@@ -785,11 +814,11 @@ fn add_host_to_list(list: &gtk::ListBox, host: &Host) {
     list.append(&row);
 }
 
-fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton)> {
+fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton, gtk::Entry, gtk::Entry)> {
     let dialog = gtk::Dialog::new();
     dialog.set_title(Some("Add Host"));
     dialog.set_modal(true);
-    dialog.set_default_size(350, 200);
+    dialog.set_default_size(350, 280);
 
     let content = dialog.content_area();
     content.set_margin_start(12);
@@ -817,26 +846,41 @@ fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::S
     let port_adjustment = gtk::Adjustment::new(8080.0, 1.0, 65535.0, 1.0, 10.0, 0.0);
     let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
 
+    let username_label = gtk::Label::new(Some("Username:"));
+    username_label.set_halign(gtk::Align::End);
+    let username_entry = gtk::Entry::new();
+    username_entry.set_placeholder_text(Some("kodi (optional)"));
+
+    let password_label = gtk::Label::new(Some("Password:"));
+    password_label.set_halign(gtk::Align::End);
+    let password_entry = gtk::Entry::new();
+    password_entry.set_placeholder_text(Some("password (optional)"));
+    password_entry.set_visibility(false);
+
     form.attach(&name_label, 0, 0, 1, 1);
     form.attach(&name_entry, 1, 0, 1, 1);
     form.attach(&address_label, 0, 1, 1, 1);
     form.attach(&address_entry, 1, 1, 1, 1);
     form.attach(&port_label, 0, 2, 1, 1);
     form.attach(&port_spin, 1, 2, 1, 1);
+    form.attach(&username_label, 0, 3, 1, 1);
+    form.attach(&username_entry, 1, 3, 1, 1);
+    form.attach(&password_label, 0, 4, 1, 1);
+    form.attach(&password_entry, 1, 4, 1, 1);
 
     content.append(&form);
 
     dialog.add_button("Cancel", gtk::ResponseType::Cancel);
     dialog.add_button("Add", gtk::ResponseType::Ok);
 
-    Some((dialog, name_entry, address_entry, port_spin))
+    Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry))
 }
 
-fn show_edit_host_dialog(host: &Host) -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton)> {
+fn show_edit_host_dialog(host: &Host) -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton, gtk::Entry, gtk::Entry)> {
     let dialog = gtk::Dialog::new();
     dialog.set_title(Some("Edit Host"));
     dialog.set_modal(true);
-    dialog.set_default_size(350, 200);
+    dialog.set_default_size(350, 280);
 
     let content = dialog.content_area();
     content.set_margin_start(12);
@@ -864,19 +908,40 @@ fn show_edit_host_dialog(host: &Host) -> Option<(gtk::Dialog, gtk::Entry, gtk::E
     let port_adjustment = gtk::Adjustment::new(host.port as f64, 1.0, 65535.0, 1.0, 10.0, 0.0);
     let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
 
+    let username_label = gtk::Label::new(Some("Username:"));
+    username_label.set_halign(gtk::Align::End);
+    let username_entry = gtk::Entry::new();
+    if let Some(ref user) = host.username {
+        username_entry.set_text(user);
+    }
+    username_entry.set_placeholder_text(Some("kodi (optional)"));
+
+    let password_label = gtk::Label::new(Some("Password:"));
+    password_label.set_halign(gtk::Align::End);
+    let password_entry = gtk::Entry::new();
+    if let Some(ref pass) = host.password {
+        password_entry.set_text(pass);
+    }
+    password_entry.set_placeholder_text(Some("password (optional)"));
+    password_entry.set_visibility(false);
+
     form.attach(&name_label, 0, 0, 1, 1);
     form.attach(&name_entry, 1, 0, 1, 1);
     form.attach(&address_label, 0, 1, 1, 1);
     form.attach(&address_entry, 1, 1, 1, 1);
     form.attach(&port_label, 0, 2, 1, 1);
     form.attach(&port_spin, 1, 2, 1, 1);
+    form.attach(&username_label, 0, 3, 1, 1);
+    form.attach(&username_entry, 1, 3, 1, 1);
+    form.attach(&password_label, 0, 4, 1, 1);
+    form.attach(&password_entry, 1, 4, 1, 1);
 
     content.append(&form);
 
     dialog.add_button("Cancel", gtk::ResponseType::Cancel);
     dialog.add_button("Save", gtk::ResponseType::Ok);
 
-    Some((dialog, name_entry, address_entry, port_spin))
+    Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry))
 }
 
 fn show_error_dialog(message: &str) {

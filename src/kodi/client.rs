@@ -1,8 +1,10 @@
+use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::types::*;
+use crate::host::Host;
 
 #[derive(Error, Debug)]
 pub enum ClientError {
@@ -22,6 +24,8 @@ pub enum ClientError {
 pub struct KodiClient {
     client: Client,
     base_url: String,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 impl KodiClient {
@@ -32,6 +36,8 @@ impl KodiClient {
                 .build()
                 .expect("Failed to create HTTP client"),
             base_url: host.url(),
+            username: None,
+            password: None,
         }
     }
 
@@ -43,6 +49,22 @@ impl KodiClient {
                 .build()
                 .expect("Failed to create HTTP client"),
             base_url: base_url.into(),
+            username: None,
+            password: None,
+        }
+    }
+
+    pub fn from_host(host: &Host) -> Self {
+        let base_url = format!("http://{}:{}", host.address, host.port);
+        Self {
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .build()
+                .expect("Failed to create HTTP client"),
+            base_url,
+            username: host.username.clone(),
+            password: host.password.clone(),
         }
     }
 
@@ -55,13 +77,23 @@ impl KodiClient {
         &self,
         request: JsonRpcRequest,
     ) -> Result<R, ClientError> {
-        let response = self
+        let mut req = self
             .client
             .post(format!("{}/jsonrpc", self.base_url))
-            .json(&request)
-            .send()
-            .await?;
+            .json(&request);
 
+        // Add Basic Auth header if credentials are provided
+        if let (Some(user), Some(pass)) = (&self.username, &self.password) {
+            let credentials = format!("{}:{}", user, pass);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+            req = req.header("Authorization", format!("Basic {}", encoded));
+        }
+
+        let response = req.send().await?;
+
+        // Debug: log response status and first bytes
+        tracing::debug!("Response status: {}", response.status());
+        
         let rpc_response: JsonRpcResponse<R> = response.json().await?;
 
         if let Some(error) = rpc_response.error {

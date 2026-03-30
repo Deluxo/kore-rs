@@ -34,6 +34,8 @@ chrono = { version = "0.4", features = ["serde"] }
 
 regex-lite = "0.1"
 
+base64 = "0.22"
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 libc = "0.2"
 
