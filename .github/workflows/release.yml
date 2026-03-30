@@ -48,7 +48,9 @@ jobs:
             libxrandr-dev \
             libxi-dev \
             libxcursor-dev \
-            libwayland-dev
+            libwayland-dev \
+            libavahi-compat-libdnssd-dev \
+            libglib2.0-dev
 
       # 5️⃣ Install cross for ARM builds
       - name: Install cross
