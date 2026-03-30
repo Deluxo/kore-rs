@@ -12,7 +12,6 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         include:
@@ -20,17 +19,21 @@ jobs:
           - target: aarch64-unknown-linux-gnu
 
     steps:
+      # 1️⃣ Checkout your repo
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2️⃣ Install Rust
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # 3️⃣ Add Rust target
       - name: Add target
         run: rustup target add ${{ matrix.target }}
 
-      # GTK deps (critical)
-      - name: Install system dependencies
+      # 4️⃣ Install system dependencies for GTK (x86_64 only)
+      - name: Install GTK dependencies
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt update
           sudo apt install -y \
@@ -38,13 +41,20 @@ jobs:
             libglib2.0-dev \
             libpango1.0-dev \
             libcairo2-dev \
-            libgdk-pixbuf-2.0-dev
+            libgdk-pixbuf-2.0-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libwayland-dev
 
-      # Cross for ARM
+      # 5️⃣ Install cross for ARM builds
       - name: Install cross
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: cargo install cross
 
+      # 6️⃣ Build
       - name: Build
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
@@ -53,12 +63,14 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
+      # 7️⃣ Package binaries
       - name: Package binary
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/korers dist/korers-${{ matrix.target }}
           tar -czf korers-${{ matrix.target }}.tar.gz -C dist korers-${{ matrix.target }}
 
+      # 8️⃣ Upload artifacts
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -69,11 +81,12 @@ jobs:
     name: Release
     needs: build
     runs-on: ubuntu-latest
-
     steps:
+      # 1️⃣ Download built artifacts
       - name: Download artifacts
         uses: actions/download-artifact@v4
 
+      # 2️⃣ Create GitHub release
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
