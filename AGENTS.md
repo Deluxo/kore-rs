@@ -221,6 +221,17 @@ GTK widgets are NOT thread-safe. Critical rules:
    });
    ```
 
+4. **Quick operations can run on main thread**: For fast operations like SSDP discovery, run them directly on the main thread rather than spawning threads:
+   ```rust
+   discover_button.connect_clicked(move |btn| {
+       let discovery = DiscoveryService::new();
+       match discovery.discover_all(5) {
+           Ok(hosts) => { /* update UI */ }
+           Err(e) => { /* show error */ }
+       }
+   });
+   ```
+
 ### Simple UI Approach
 
 For complex UIs, build the UI in `app.rs` or a Relm4 component:
