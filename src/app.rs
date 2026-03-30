@@ -1,17 +1,18 @@
 use gtk::prelude::*;
 use gtk::Application;
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::host::{Host, manager::HostManager};
-use crate::kodi::discovery::DiscoveryService;
-use crate::kodi::client::InputAction;
+use crate::host::Host;
+use crate::host::manager::HostManager;
 use crate::kodi::KodiClient;
+use crate::kodi::client::InputAction;
+use crate::kodi::discovery::DiscoveryService;
 
 pub struct App {
     app: Application,
     hosts: Vec<Host>,
+    host_manager: Rc<RefCell<Option<HostManager>>>,
 }
 
 impl App {
@@ -19,11 +20,7 @@ impl App {
         let app = Application::builder()
             .application_id("org.korers.app")
             .build();
-
-        Self {
-            app,
-            hosts: Vec::new(),
-        }
+        Self { app, hosts: Vec::new(), host_manager: Rc::new(RefCell::new(None)) }
     }
 
     pub fn init_logging(self) -> Self {
@@ -38,935 +35,454 @@ impl App {
     }
 
     pub fn load_hosts(mut self) -> Self {
-        if let Ok(manager) = HostManager::new() {
-            self.hosts = manager.hosts().to_vec();
+        if let Ok(mgr) = HostManager::new() {
+            self.hosts = mgr.hosts().to_vec();
+            *self.host_manager.borrow_mut() = Some(mgr);
         }
         self
     }
 
     pub fn show_window(self) -> Self {
         let hosts = self.hosts.clone();
+        let host_manager = self.host_manager.clone();
         
         self.app.connect_activate(move |app| {
             let window = gtk::ApplicationWindow::builder()
                 .application(app)
-                .title("Korers - Kodi Remote")
-                .default_width(800)
-                .default_height(600)
+                .title("Korers")
+                .default_width(400)
+                .default_height(700)
                 .build();
 
-            let vbox = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .build();
-
+            // Header
             let header = gtk::HeaderBar::builder()
                 .title_widget(&gtk::Label::new(Some("Korers")))
                 .show_title_buttons(true)
                 .build();
+            let menu_btn = gtk::MenuButton::builder().icon_name("open-menu").build();
+            header.pack_start(&menu_btn);
 
-            let main_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .hexpand(true)
-                .vexpand(true)
-                .build();
-
-            let sidebar = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .width_request(250)
-                .build();
-
-            let hosts_label = gtk::Label::builder()
-                .label("Hosts")
-                .halign(gtk::Align::Start)
-                .margin_start(12)
-                .margin_top(12)
-                .margin_bottom(12)
-                .build();
-
-            let host_list = gtk::ListBox::builder()
-                .vexpand(true)
-                .margin_start(8)
-                .margin_end(8)
-                .build();
-
-            for host in &hosts {
-                add_host_to_list(&host_list, host);
-            }
-
-            let button_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(8)
-                .margin_start(8)
-                .margin_end(8)
-                .margin_top(8)
-                .margin_bottom(8)
-                .build();
-
-            let discover_button = gtk::Button::builder()
-                .label("Discover")
-                .build();
-
-            let add_button = gtk::Button::builder()
-                .label("Add")
-                .hexpand(true)
-                .build();
-
-            let edit_button = gtk::Button::builder()
-                .label("Edit")
-                .build();
-
-            let delete_button = gtk::Button::builder()
-                .label("Delete")
-                .build();
-
-            let status_label = gtk::Label::builder()
-                .label("Ready")
-                .halign(gtk::Align::Start)
-                .margin_start(8)
-                .margin_end(8)
-                .build();
-
-            let connection_status = gtk::Label::builder()
-                .label("Disconnected")
-                .halign(gtk::Align::Start)
-                .margin_start(8)
-                .margin_end(8)
-                .margin_bottom(8)
-                .build();
-
-            let sep = gtk::Separator::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .build();
-
-            let main_stack = gtk::Stack::builder()
-                .vexpand(true)
-                .hexpand(true)
-                .build();
-
-            let welcome_label = gtk::Label::new(Some("Select a host to get started"));
-            main_stack.add_titled(&welcome_label, Some("welcome"), "Welcome");
-
-            // Build Remote Control UI
-            let remote_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(16)
-                .hexpand(true)
-                .vexpand(true)
-                .build();
-
-            // D-pad section
-            let dpad_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(4)
-                .build();
-
-            let dpad_up = gtk::Button::builder()
-                .label("▲")
-                .build();
-            let dpad_row = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(4)
-                .build();
-            let dpad_left = gtk::Button::builder()
-                .label("◀")
-                .build();
-            let dpad_select = gtk::Button::builder()
-                .label("OK")
-                .build();
-            let dpad_right = gtk::Button::builder()
-                .label("▶")
-                .build();
-            let dpad_down = gtk::Button::builder()
-                .label("▼")
-                .build();
-
-            dpad_row.append(&dpad_left);
-            dpad_row.append(&dpad_select);
-            dpad_row.append(&dpad_right);
-            dpad_box.append(&dpad_up);
-            dpad_box.append(&dpad_row);
-            dpad_box.append(&dpad_down);
-
-            // Navigation buttons
-            let nav_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(8)
-                .build();
-            let back_btn = gtk::Button::builder()
-                .label("Back")
-                .build();
-            let home_btn = gtk::Button::builder()
-                .label("Home")
-                .build();
-            let info_btn = gtk::Button::builder()
-                .label("Info")
-                .build();
-            nav_box.append(&back_btn);
-            nav_box.append(&home_btn);
-            nav_box.append(&info_btn);
-
-            // Transport controls
-            let transport_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(8)
-                .build();
-            let prev_btn = gtk::Button::builder()
-                .label("⏮")
-                .build();
-            let play_btn = gtk::Button::builder()
-                .label("▶/⏸")
-                .build();
-            let stop_btn = gtk::Button::builder()
-                .label("⏹")
-                .build();
-            let next_btn = gtk::Button::builder()
-                .label("⏭")
-                .build();
-            transport_box.append(&prev_btn);
-            transport_box.append(&play_btn);
-            transport_box.append(&stop_btn);
-            transport_box.append(&next_btn);
-
-            // Volume controls
-            let volume_box = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(8)
-                .build();
-            let mute_btn = gtk::Button::builder()
-                .label("🔇")
-                .build();
-            let vol_down_btn = gtk::Button::builder()
-                .label("🔉")
-                .build();
-            let vol_label = gtk::Label::new(Some("Volume"));
-            let vol_up_btn = gtk::Button::builder()
-                .label("🔊")
-                .build();
-            volume_box.append(&mute_btn);
-            volume_box.append(&vol_down_btn);
-            volume_box.append(&vol_label);
-            volume_box.append(&vol_up_btn);
-
-            remote_box.append(&dpad_box);
-            remote_box.append(&nav_box);
-            remote_box.append(&transport_box);
-            remote_box.append(&volume_box);
-
-            main_stack.add_titled(&remote_box, Some("remote"), "Remote");
-
-            // Store for connected client
+            // Popover for hosts
+            let popover = gtk::Popover::new();
             let client: Rc<RefCell<Option<KodiClient>>> = Rc::new(RefCell::new(None));
+            
+            let host_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
+            host_box.set_width_request(320);
+            host_box.set_margin_start(12); host_box.set_margin_end(12); 
+            host_box.set_margin_top(12); host_box.set_margin_bottom(12);
 
-            // Wire up D-pad buttons
-            let client_for_dpad = client.clone();
-            dpad_up.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_dpad.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Up));
+            let label = gtk::Label::new(Some("Hosts"));
+            label.set_halign(gtk::Align::Start);
+            host_box.append(&label);
+
+            let list = gtk::ListBox::new();
+            for host in &hosts {
+                add_host_to_list(&list, host);
+            }
+            host_box.append(&list);
+
+            let btns = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let discover = gtk::Button::with_label("Discover");
+            let add = gtk::Button::with_label("Add");
+            let edit = gtk::Button::with_label("Edit");
+            let del = gtk::Button::with_label("Del");
+            btns.append(&discover); btns.append(&add); btns.append(&edit); btns.append(&del);
+            host_box.append(&btns);
+
+            let list = list.clone();
+            let client = client.clone();
+            let mgr = host_manager.clone();
+            discover.connect_clicked(move |_| {
+                let discovery = DiscoveryService::new();
+                match discovery.discover_all(3) {
+                    Ok(infos) => {
+                        for info in infos {
+                            let host = Host::new(info.name.clone(), info.address.clone(), info.port);
+                            let mut m = mgr.borrow_mut();
+                            if let Some(ref mut manager) = *m {
+                                let _ = manager.add_host(host);
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!("Discovery failed: {:?}", e),
                 }
             });
 
-            let client_for_dpad = client.clone();
-            dpad_down.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_dpad.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Down));
-                }
+            let add = add.clone();
+            let list_for_add = list.clone();
+            add.connect_clicked(move |_| {
+                let dialog = gtk::Dialog::with_buttons(
+                    Some("Add Host"),
+                    None::<&gtk::Window>,
+                    gtk::DialogFlags::MODAL,
+                    &[
+                        ("Cancel", gtk::ResponseType::Cancel),
+                        ("Add", gtk::ResponseType::Accept),
+                    ],
+                );
+                let name_entry = gtk::Entry::new();
+                name_entry.set_placeholder_text(Some("Name"));
+                let addr_entry = gtk::Entry::new();
+                addr_entry.set_placeholder_text(Some("Address (e.g., 192.168.1.100)"));
+                let port_entry = gtk::Entry::new();
+                port_entry.set_placeholder_text(Some("Port (default: 8080)"));
+                port_entry.set_text("8080");
+                let user_entry = gtk::Entry::new();
+                user_entry.set_placeholder_text(Some("Username (optional)"));
+                let pass_entry = gtk::Entry::new();
+                pass_entry.set_placeholder_text(Some("Password (optional)"));
+                pass_entry.set_visibility(false);
+
+                let vb = gtk::Box::new(gtk::Orientation::Vertical, 8);
+                vb.set_margin_start(12); vb.set_margin_end(12);
+                vb.append(&name_entry);
+                vb.append(&addr_entry);
+                vb.append(&port_entry);
+                vb.append(&user_entry);
+                vb.append(&pass_entry);
+
+                let content = dialog.content_area();
+                content.append(&vb);
+                dialog.show();
+
+                let list = list_for_add.clone();
+                dialog.connect_response(move |dlg, resp| {
+                    if resp == gtk::ResponseType::Accept {
+                        let name = name_entry.text().to_string();
+                        let addr = addr_entry.text().to_string();
+                        let port: u16 = port_entry.text().parse().unwrap_or(8080);
+                        let user = if user_entry.text().is_empty() { None } else { Some(user_entry.text().to_string()) };
+                        let pass = if pass_entry.text().is_empty() { None } else { Some(pass_entry.text().to_string()) };
+                        if !name.is_empty() && !addr.is_empty() {
+                            let host = Host::new_with_credentials(name, addr, port, user, pass);
+                            let row = gtk::ListBoxRow::new();
+                            let hb = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+                            hb.set_margin_start(12); hb.set_margin_end(12);
+                            hb.set_margin_top(8); hb.set_margin_bottom(8);
+                            let icon = gtk::Image::from_icon_name("computer");
+                            hb.append(&icon);
+                            let vb = gtk::Box::new(gtk::Orientation::Vertical, 2);
+                            let lbl = gtk::Label::new(Some(&host.name));
+                            lbl.set_halign(gtk::Align::Start); lbl.set_hexpand(true);
+                            let addr_lbl = gtk::Label::new(Some(&format!("{}:{}", host.address, host.port)));
+                            addr_lbl.set_halign(gtk::Align::Start);
+                            vb.append(&lbl); vb.append(&addr_lbl);
+                            hb.append(&vb);
+                            row.set_child(Some(&hb));
+                            list.append(&row);
+                        }
+                    }
+                    dlg.close();
+                });
             });
 
-            let client_for_dpad = client.clone();
-            dpad_left.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_dpad.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Left));
-                }
+            let list2 = list.clone();
+            let edit2 = edit.clone();
+            let del2 = del.clone();
+            list2.connect_row_selected(move |_, row| {
+                let selected = row.is_some();
+                edit2.set_sensitive(selected);
+                del2.set_sensitive(selected);
             });
 
-            let client_for_dpad = client.clone();
-            dpad_right.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_dpad.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Right));
-                }
-            });
+            let list_edit = list.clone();
+            let mgr_edit = host_manager.clone();
+            edit.connect_clicked(move |_| {
+                if let Some(row) = list_edit.selected_row() {
+                    let idx = row.index() as usize;
+                    let m = mgr_edit.borrow();
+                    if let Some(manager) = m.as_ref() {
+                        if let Some(host) = manager.hosts().get(idx) {
+                            let dialog = gtk::Dialog::with_buttons(
+                                Some("Edit Host"),
+                                None::<&gtk::Window>,
+                                gtk::DialogFlags::MODAL,
+                                &[
+                                    ("Cancel", gtk::ResponseType::Cancel),
+                                    ("Save", gtk::ResponseType::Accept),
+                                ],
+                            );
+                            let name_entry = gtk::Entry::new();
+                            name_entry.set_text(&host.name);
+                            let addr_entry = gtk::Entry::new();
+                            addr_entry.set_text(&host.address);
+                            let port_entry = gtk::Entry::new();
+                            port_entry.set_text(&host.port.to_string());
+                            let user_entry = gtk::Entry::new();
+                            user_entry.set_text(host.username.as_deref().unwrap_or(""));
+                            user_entry.set_placeholder_text(Some("Username (optional)"));
+                            let pass_entry = gtk::Entry::new();
+                            pass_entry.set_text(host.password.as_deref().unwrap_or(""));
+                            pass_entry.set_placeholder_text(Some("Password (optional)"));
+                            pass_entry.set_visibility(false);
 
-            let client_for_dpad = client.clone();
-            dpad_select.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_dpad.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Select));
-                }
-            });
+                            let vb = gtk::Box::new(gtk::Orientation::Vertical, 8);
+                            vb.set_margin_start(12); vb.set_margin_end(12);
+                            vb.append(&name_entry);
+                            vb.append(&addr_entry);
+                            vb.append(&port_entry);
+                            vb.append(&user_entry);
+                            vb.append(&pass_entry);
 
-            // Navigation buttons
-            let client_for_nav = client.clone();
-            back_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_nav.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Back));
-                }
-            });
+                            let content = dialog.content_area();
+                            content.append(&vb);
+                            dialog.show();
 
-            let client_for_nav = client.clone();
-            home_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_nav.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Home));
-                }
-            });
-
-            let client_for_nav = client.clone();
-            info_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_nav.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.input(InputAction::Info));
-                }
-            });
-
-            // Transport controls
-            let client_for_transport = client.clone();
-            play_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_transport.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.play_pause(player.playerid));
+                            let host_id = host.id.clone();
+                            let mgr_resp = mgr_edit.clone();
+                            dialog.connect_response(move |dlg, resp| {
+                                if resp == gtk::ResponseType::Accept {
+                                    let name = name_entry.text().to_string();
+                                    let addr = addr_entry.text().to_string();
+                                    let port: u16 = port_entry.text().parse().unwrap_or(8080);
+                                    let user = if user_entry.text().is_empty() { None } else { Some(user_entry.text().to_string()) };
+                                    let pass = if pass_entry.text().is_empty() { None } else { Some(pass_entry.text().to_string()) };
+                                    if !name.is_empty() && !addr.is_empty() {
+                                        let new_host = Host::new_with_credentials(name, addr, port, user, pass);
+                                        let mut m = mgr_resp.borrow_mut();
+                                        if let Some(ref mut manager) = *m {
+                                            let _ = manager.update_host(new_host);
+                                        }
+                                    }
+                                }
+                                dlg.close();
+                            });
                         }
                     }
                 }
             });
 
-            let client_for_transport = client.clone();
-            stop_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_transport.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.stop(player.playerid));
+            let list3 = list.clone();
+            let del3 = del.clone();
+            let mgr3 = host_manager.clone();
+            del3.connect_clicked(move |_| {
+                if let Some(row) = list3.selected_row() {
+                    let idx = row.index() as usize;
+                    let m = mgr3.borrow();
+                    if let Some(manager) = m.as_ref() {
+                        if let Some(hosts) = manager.hosts().get(idx) {
+                            let host_id = hosts.id.clone();
+                            drop(m);
+                            if let Ok(mut mm) = mgr3.try_borrow_mut() {
+                                if let Some(ref mut manager) = *mm {
+                                    let _ = manager.remove_host(&host_id);
+                                }
+                            }
                         }
                     }
+                    list3.remove(&row);
                 }
             });
 
-            let client_for_transport = client.clone();
-            prev_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_transport.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.go_to(player.playerid, "previous"));
-                        }
-                    }
-                }
-            });
+            popover.set_child(Some(&host_box));
+            menu_btn.set_popover(Some(&popover));
 
-            let client_for_transport = client.clone();
-            next_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_transport.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.go_to(player.playerid, "next"));
-                        }
-                    }
-                }
-            });
-
-            // Volume controls
-            let client_for_vol = client.clone();
-            vol_up_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_vol.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(props) = rt.block_on(c.get_application_properties()) {
-                        let new_vol = (props.volume + 10).min(100);
-                        let _ = rt.block_on(c.set_volume(new_vol));
-                    }
-                }
-            });
-
-            let client_for_vol = client.clone();
-            vol_down_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_vol.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(props) = rt.block_on(c.get_application_properties()) {
-                        let new_vol = (props.volume - 10).max(0);
-                        let _ = rt.block_on(c.set_volume(new_vol));
-                    }
-                }
-            });
-
-            let client_for_vol = client.clone();
-            mute_btn.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_vol.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(props) = rt.block_on(c.get_application_properties()) {
-                        let _ = rt.block_on(c.set_mute(!props.muted));
-                    }
-                }
-            });
-
-            // Build Now Playing UI
-            let nowplaying_box = gtk::Box::builder()
+            // Main content
+            let content = gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
-                .spacing(16)
                 .hexpand(true)
                 .vexpand(true)
                 .build();
 
-            let np_thumbnail = gtk::Image::from_icon_name("audio-x-generic");
+            // Now Playing
+            let now_playing = create_now_playing_box(client.clone());
+            content.append(&now_playing);
 
-            let np_title = gtk::Label::new(Some("No media playing"));
-            np_title.set_markup("<big><b>No media playing</b></big>");
-            np_title.set_halign(gtk::Align::Center);
+            // Remote
+            let remote = create_remote_box(client.clone());
+            content.append(&remote);
 
-            let np_artist = gtk::Label::new(Some(""));
-            np_artist.set_halign(gtk::Align::Center);
-
-            let np_album = gtk::Label::new(Some(""));
-            np_album.set_halign(gtk::Align::Center);
-
-            let np_progress = gtk::Scale::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .hexpand(true)
-                .build();
-            np_progress.set_range(0.0, 100.0);
-            np_progress.set_value(0.0);
-
-            let np_time = gtk::Label::new(Some("0:00 / 0:00"));
-            np_time.set_halign(gtk::Align::Center);
-
-            // Transport controls for Now Playing
-            let np_transport = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(16)
-                .build();
-            let np_prev = gtk::Button::builder().label("⏮").build();
-            let np_play = gtk::Button::builder().label("▶/⏸").build();
-            let np_stop = gtk::Button::builder().label("⏹").build();
-            let np_next = gtk::Button::builder().label("⏭").build();
-            np_transport.append(&np_prev);
-            np_transport.append(&np_play);
-            np_transport.append(&np_stop);
-            np_transport.append(&np_next);
-
-            nowplaying_box.append(&np_thumbnail);
-            nowplaying_box.append(&np_title);
-            nowplaying_box.append(&np_artist);
-            nowplaying_box.append(&np_album);
-            nowplaying_box.append(&np_progress);
-            nowplaying_box.append(&np_time);
-            nowplaying_box.append(&np_transport);
-
-            main_stack.add_titled(&nowplaying_box, Some("nowplaying"), "Now Playing");
-
-            // Wire up Now Playing transport buttons
-            let client_for_np = client.clone();
-            np_play.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_np.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.play_pause(player.playerid));
-                        }
-                    }
-                }
-            });
-
-            let client_for_np = client.clone();
-            np_stop.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_np.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.stop(player.playerid));
-                        }
-                    }
-                }
-            });
-
-            let client_for_np = client.clone();
-            np_prev.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_np.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.go_to(player.playerid, "previous"));
-                        }
-                    }
-                }
-            });
-
-            let client_for_np = client.clone();
-            np_next.connect_clicked(move |_| {
-                if let Some(ref c) = *client_for_np.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if let Ok(players) = rt.block_on(c.get_active_players()) {
-                        if let Some(player) = players.first() {
-                            let _ = rt.block_on(c.go_to(player.playerid, "next"));
-                        }
-                    }
-                }
-            });
-
-            let settings_label = gtk::Label::new(Some("Settings"));
-            main_stack.add_titled(&settings_label, Some("settings"), "Settings");
-
-            // Host selection handler - auto-connect when host is clicked
-            let hosts_for_selection = hosts.clone();
-            let connection_status_clone = connection_status.clone();
-            let main_stack_clone = main_stack.clone();
-            let client_clone = client.clone();
-            
-            host_list.connect_row_selected(move |_list, row| {
-                if let Some(row) = row {
-                    let index = row.index() as usize;
-                    if let Some(host) = hosts_for_selection.get(index) {
-                        connection_status_clone.set_label("Connecting...");
-                        
-                        tracing::info!("Connecting to host: {} at {}:{} with username: {:?}", 
-                            host.name, host.address, host.port, host.username);
-                        let new_client = KodiClient::from_host(host);
-                        
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        match rt.block_on(new_client.ping()) {
-                            Ok(response) => {
-                                tracing::info!("Connected to {}: {}", host.name, response);
-                                connection_status_clone.set_label(&format!("Connected to {}", host.name));
-                                *client_clone.borrow_mut() = Some(new_client);
-                                main_stack_clone.set_visible_child_name("remote");
-                            }
-                            Err(e) => {
-                                tracing::error!("Connection failed: {:?}", e);
-                                let error_detail = format!("{:?}", e);
-                                connection_status_clone.set_label(&format!("Error: {}", e));
-                                let debug_info = format!(
-                                    "Failed to connect to {}\n\n\
-                                    Address: {}:{}\n\n\
-                                    Error: {}\n\n\
-                                    Possible causes:\n\
-                                    - Wrong IP address or port\n\
-                                    - Firewall blocking the connection\n\
-                                    - Kodi not running or not enabled for HTTP control",
-                                    host.name, host.address, host.port, error_detail
-                                );
-                                show_error_dialog(&debug_info);
-                            }
-                        }
-                    }
-                }
-            });
-
-            sidebar.append(&hosts_label);
-            sidebar.append(&host_list);
-            sidebar.append(&button_box);
-            sidebar.append(&connection_status);
-            sidebar.append(&status_label);
-
-            button_box.append(&discover_button);
-            button_box.append(&add_button);
-            button_box.append(&edit_button);
-            button_box.append(&delete_button);
-
-            main_box.append(&sidebar);
-            main_box.append(&sep);
-            main_box.append(&main_stack);
-
-            vbox.append(&header);
-            vbox.append(&main_box);
-
-            window.set_child(Some(&vbox));
-
-            let host_list_for_discovery = host_list.clone();
-            let status_label_for_discovery = status_label.clone();
-            let status_label_for_add = status_label.clone();
-            
-            discover_button.connect_clicked(move |btn| {
-                let host_list = host_list_for_discovery.clone();
-                
-                status_label_for_discovery.set_label("Discovering...");
-                btn.set_sensitive(false);
-                
-                let discovery = DiscoveryService::new();
-                match discovery.discover_all(5) {
-                    Ok(discovered) => {
-                        tracing::info!("Discovery found {} hosts", discovered.len());
-                        
-                        for host_info in &discovered {
-                            let host = Host::new(
-                                host_info.name.clone(),
-                                host_info.address.clone(),
-                                host_info.port,
-                            );
-                            
-                            if let Ok(mut manager) = HostManager::new() {
-                                let _ = manager.add_host(host.clone());
-                            }
-                            
-                            add_host_to_list(&host_list, &host);
-                        }
-                        
-                        let host_count = discovered.len();
-                        let status = if host_count > 0 {
-                            format!("Found {} hosts", host_count)
-                        } else {
-                            "No hosts found".to_string()
-                        };
-                        status_label_for_discovery.set_label(&status);
-                    }
-                    Err(e) => {
-                        tracing::error!("Discovery failed: {}", e);
-                        status_label_for_discovery.set_label(&format!("Error: {}", e));
-                    }
-                }
-                btn.set_sensitive(true);
-            });
-
-            let host_list_for_add = host_list.clone();
-            
-            add_button.connect_clicked(move |_| {
-                if let Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry)) = show_add_host_dialog() {
-                    let host_list = host_list_for_add.clone();
-                    let status_label = status_label_for_add.clone();
-                    
-                    dialog.connect_response(move |dialog, response| {
-                        if response == gtk::ResponseType::Ok {
-                            let name = name_entry.text().to_string();
-                            let address = address_entry.text().to_string();
-                            let port = port_spin.value() as u16;
-                            let username = username_entry.text().to_string();
-                            let password = password_entry.text().to_string();
-                            
-                            if !name.is_empty() && !address.is_empty() {
-                                let host = Host::new_with_credentials(
-                                    name.clone(),
-                                    address,
-                                    port,
-                                    if username.is_empty() { None } else { Some(username) },
-                                    if password.is_empty() { None } else { Some(password) },
-                                );
-                                
-                                add_host_to_list(&host_list, &host);
-                                status_label.set_label(&format!("Added {}", name));
-                                
-                                if let Ok(mut manager) = HostManager::new() {
-                                    let _ = manager.add_host(host);
-                                }
-                            }
-                        }
-                        dialog.destroy();
-                    });
-                    
-                    dialog.show();
-                }
-            });
-
-            // Edit button - edit selected host
-            let hosts_for_edit = hosts.clone();
-            let host_list_for_edit = host_list.clone();
-            let status_label_for_edit = status_label.clone();
-            
-            edit_button.connect_clicked(move |_| {
-                // Get selected row
-                if let Some(selected_row) = host_list_for_edit.selected_row() {
-                    let index = selected_row.index() as usize;
-                    if let Some(host) = hosts_for_edit.get(index) {
-                        if let Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry)) = show_edit_host_dialog(host) {
-                            let host_list = host_list_for_edit.clone();
-                            let status_label = status_label_for_edit.clone();
-                            let original_host = host.clone();
-                            
-                            dialog.connect_response(move |dialog, response| {
-                                if response == gtk::ResponseType::Ok {
-                                    let name = name_entry.text().to_string();
-                                    let address = address_entry.text().to_string();
-                                    let port = port_spin.value() as u16;
-                                    let username = username_entry.text().to_string();
-                                    let password = password_entry.text().to_string();
-                                    
-                                    if !name.is_empty() && !address.is_empty() {
-                                        let updated_host = Host::new_with_credentials(
-                                            name.clone(),
-                                            address,
-                                            port,
-                                            if username.is_empty() { None } else { Some(username) },
-                                            if password.is_empty() { None } else { Some(password) },
-                                        );
-                                        
-                                        // Update in manager
-                                        if let Ok(mut manager) = HostManager::new() {
-                                            let _ = manager.remove_host(&original_host.id);
-                                            let _ = manager.add_host(updated_host.clone());
-                                        }
-                                        
-                                        // Refresh list - rebuild all hosts
-                                        while let Some(child) = host_list.first_child() {
-                                            host_list.remove(&child);
-                                        }
-                                        if let Ok(manager) = HostManager::new() {
-                                            for h in manager.hosts() {
-                                                add_host_to_list(&host_list, h);
-                                            }
-                                        }
-                                        
-                                        status_label.set_label(&format!("Updated {}", name));
-                                    }
-                                }
-                                dialog.destroy();
-                            });
-                            
-                            dialog.show();
-                        }
-                    }
-                } else {
-                    show_error_dialog("Please select a host to edit.");
-                }
-            });
-
-            // Delete button - delete selected host
-            let host_list_for_delete = host_list.clone();
-            let status_label_for_delete = status_label.clone();
-            
-            delete_button.connect_clicked(move |_| {
-                if let Some(selected_row) = host_list_for_delete.selected_row() {
-                    let index = selected_row.index() as usize;
-                    
-                    // Get fresh list of hosts from manager
-                    if let Ok(manager) = HostManager::new() {
-                        let hosts = manager.hosts().to_vec();
-                        if let Some(host) = hosts.get(index) {
-                            let name = host.name.clone();
-                            let id = host.id.clone();
-                            
-                            // Remove from manager
-                            if let Ok(mut mgr) = HostManager::new() {
-                                match mgr.remove_host(&id) {
-                                    Ok(()) => {
-                                        // Refresh list
-                                        while let Some(child) = host_list_for_delete.first_child() {
-                                            host_list_for_delete.remove(&child);
-                                        }
-                                        if let Ok(manager) = HostManager::new() {
-                                            for h in manager.hosts() {
-                                                add_host_to_list(&host_list_for_delete, h);
-                                            }
-                                        }
-                                        status_label_for_delete.set_label(&format!("Deleted {}", name));
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Failed to delete host: {}", e);
-                                        status_label_for_delete.set_label(&format!("Error: {}", e));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    show_error_dialog("Please select a host to delete.");
-                }
-            });
-
+            window.set_titlebar(Some(&header));
+            window.set_child(Some(&content));
             window.show();
         });
         self
     }
 
-    pub fn show_host_selection(self) -> Self {
-        self
-    }
-
-    pub fn run(self) {
-        self.app.run();
-    }
+    pub fn show_host_selection(self) -> Self { self }
+    pub fn run(self) { self.app.run(); }
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
-    }
+impl Default for App { fn default() -> Self { Self::new() } }
+
+fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
+    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    box_.set_margin_start(12); box_.set_margin_end(12); box_.set_margin_top(12); box_.set_margin_bottom(12);
+    box_.set_hexpand(true);
+
+    let title = gtk::Label::new(Some("<big><b>No media playing</b></big>"));
+    title.set_halign(gtk::Align::Center);
+    title.set_use_markup(true);
+    box_.append(&title);
+
+    let artist = gtk::Label::new(Some(""));
+    artist.set_halign(gtk::Align::Center);
+    box_.append(&artist);
+
+    let transport = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    transport.set_halign(gtk::Align::Center);
+
+    let prev = gtk::Button::with_label("⏮");
+    let play = gtk::Button::with_label("▶/⏸");
+    let stop = gtk::Button::with_label("⏹");
+    let next = gtk::Button::with_label("⏭");
+
+    let c = client.clone();
+    prev.connect_clicked(move |_| transport_action(&c, "previous"));
+    let c = client.clone();
+    play.connect_clicked(move |_| transport_action(&c, "play_pause"));
+    let c = client.clone();
+    stop.connect_clicked(move |_| transport_action(&c, "stop"));
+    let c = client.clone();
+    next.connect_clicked(move |_| transport_action(&c, "next"));
+
+    transport.append(&prev); transport.append(&play); transport.append(&stop); transport.append(&next);
+    box_.append(&transport);
+
+    box_
+}
+
+fn create_remote_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
+    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 16);
+    box_.set_margin_start(12); box_.set_margin_end(12); box_.set_margin_top(12); box_.set_margin_bottom(12);
+    box_.set_hexpand(true); box_.set_vexpand(true);
+
+    // Nav
+    let nav = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    nav.set_halign(gtk::Align::Center);
+    let back = gtk::Button::with_label("Back");
+    let home = gtk::Button::with_label("Home");
+    let info = gtk::Button::with_label("Info");
+    let c = client.clone();
+    back.connect_clicked(move |_| send_input(&c, InputAction::Back));
+    let c = client.clone();
+    home.connect_clicked(move |_| send_input(&c, InputAction::Home));
+    let c = client.clone();
+    info.connect_clicked(move |_| send_input(&c, InputAction::Info));
+    nav.append(&back); nav.append(&home); nav.append(&info);
+    box_.append(&nav);
+
+    // D-pad
+    let dpad = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    dpad.set_halign(gtk::Align::Center);
+    let up = gtk::Button::with_label("▲");
+    let mid = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let left = gtk::Button::with_label("◀");
+    let ok = gtk::Button::with_label("OK");
+    let right = gtk::Button::with_label("▶");
+    let down = gtk::Button::with_label("▼");
+    
+    let c = client.clone();
+    up.connect_clicked(move |_| send_input(&c, InputAction::Up));
+    let c = client.clone();
+    left.connect_clicked(move |_| send_input(&c, InputAction::Left));
+    let c = client.clone();
+    ok.connect_clicked(move |_| send_input(&c, InputAction::Select));
+    let c = client.clone();
+    right.connect_clicked(move |_| send_input(&c, InputAction::Right));
+    let c = client.clone();
+    down.connect_clicked(move |_| send_input(&c, InputAction::Down));
+
+    mid.append(&left); mid.append(&ok); mid.append(&right);
+    dpad.append(&up); dpad.append(&mid); dpad.append(&down);
+    box_.append(&dpad);
+
+    // Transport
+    let transport = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    transport.set_halign(gtk::Align::Center);
+    let t_prev = gtk::Button::with_label("⏮");
+    let t_play = gtk::Button::with_label("▶/⏸");
+    let t_stop = gtk::Button::with_label("⏹");
+    let t_next = gtk::Button::with_label("⏭");
+
+    let c = client.clone();
+    t_prev.connect_clicked(move |_| transport_action(&c, "previous"));
+    let c = client.clone();
+    t_play.connect_clicked(move |_| transport_action(&c, "play_pause"));
+    let c = client.clone();
+    t_stop.connect_clicked(move |_| transport_action(&c, "stop"));
+    let c = client.clone();
+    t_next.connect_clicked(move |_| transport_action(&c, "next"));
+
+    transport.append(&t_prev); transport.append(&t_play); transport.append(&t_stop); transport.append(&t_next);
+    box_.append(&transport);
+
+    // Volume
+    let volume = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    volume.set_halign(gtk::Align::Center);
+    let mute = gtk::Button::with_label("🔇");
+    let v_down = gtk::Button::with_label("🔉");
+    let v_up = gtk::Button::with_label("🔊");
+
+    let c = client.clone();
+    mute.connect_clicked(move |_| volume_mute(&c));
+    let c = client.clone();
+    v_down.connect_clicked(move |_| volume_change(&c, -10));
+    let c = client.clone();
+    v_up.connect_clicked(move |_| volume_change(&c, 10));
+
+    volume.append(&mute); volume.append(&v_down); volume.append(&v_up);
+    box_.append(&volume);
+
+    box_
 }
 
 fn add_host_to_list(list: &gtk::ListBox, host: &Host) {
     let row = gtk::ListBoxRow::new();
-    
-    let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    box_.set_margin_start(12);
-    box_.set_margin_end(12);
-    box_.set_margin_top(8);
-    box_.set_margin_bottom(8);
-
+    let hb = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    hb.set_margin_start(12); hb.set_margin_end(12); hb.set_margin_top(8); hb.set_margin_bottom(8);
     let icon = gtk::Image::from_icon_name("computer");
-    box_.append(&icon);
-
-    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    
-    let name_label = gtk::Label::new(Some(&host.name));
-    name_label.set_halign(gtk::Align::Start);
-    name_label.set_hexpand(true);
-    vbox.append(&name_label);
-
-    let addr_label = gtk::Label::new(Some(&format!("{}:{}", host.address, host.port)));
-    addr_label.set_halign(gtk::Align::Start);
-    vbox.append(&addr_label);
-
-    box_.append(&vbox);
-
-    row.set_child(Some(&box_));
+    hb.append(&icon);
+    let vb = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let name = gtk::Label::new(Some(&host.name));
+    name.set_halign(gtk::Align::Start); name.set_hexpand(true);
+    let addr = gtk::Label::new(Some(&format!("{}:{}", host.address, host.port)));
+    addr.set_halign(gtk::Align::Start);
+    vb.append(&name); vb.append(&addr);
+    hb.append(&vb);
+    row.set_child(Some(&hb));
     list.append(&row);
 }
 
-fn show_add_host_dialog() -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton, gtk::Entry, gtk::Entry)> {
-    let dialog = gtk::Dialog::new();
-    dialog.set_title(Some("Add Host"));
-    dialog.set_modal(true);
-    dialog.set_default_size(350, 280);
-
-    let content = dialog.content_area();
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-    content.set_spacing(12);
-
-    let form = gtk::Grid::new();
-    form.set_row_spacing(8);
-    form.set_column_spacing(8);
-
-    let name_label = gtk::Label::new(Some("Name:"));
-    name_label.set_halign(gtk::Align::End);
-    let name_entry = gtk::Entry::new();
-    name_entry.set_placeholder_text(Some("Kodi @ 192.168.1.100"));
-
-    let address_label = gtk::Label::new(Some("Address:"));
-    address_label.set_halign(gtk::Align::End);
-    let address_entry = gtk::Entry::new();
-    address_entry.set_placeholder_text(Some("192.168.1.100"));
-
-    let port_label = gtk::Label::new(Some("Port:"));
-    port_label.set_halign(gtk::Align::End);
-    let port_adjustment = gtk::Adjustment::new(8080.0, 1.0, 65535.0, 1.0, 10.0, 0.0);
-    let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
-
-    let username_label = gtk::Label::new(Some("Username:"));
-    username_label.set_halign(gtk::Align::End);
-    let username_entry = gtk::Entry::new();
-    username_entry.set_placeholder_text(Some("kodi (optional)"));
-
-    let password_label = gtk::Label::new(Some("Password:"));
-    password_label.set_halign(gtk::Align::End);
-    let password_entry = gtk::Entry::new();
-    password_entry.set_placeholder_text(Some("password (optional)"));
-    password_entry.set_visibility(false);
-
-    form.attach(&name_label, 0, 0, 1, 1);
-    form.attach(&name_entry, 1, 0, 1, 1);
-    form.attach(&address_label, 0, 1, 1, 1);
-    form.attach(&address_entry, 1, 1, 1, 1);
-    form.attach(&port_label, 0, 2, 1, 1);
-    form.attach(&port_spin, 1, 2, 1, 1);
-    form.attach(&username_label, 0, 3, 1, 1);
-    form.attach(&username_entry, 1, 3, 1, 1);
-    form.attach(&password_label, 0, 4, 1, 1);
-    form.attach(&password_entry, 1, 4, 1, 1);
-
-    content.append(&form);
-
-    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-    dialog.add_button("Add", gtk::ResponseType::Ok);
-
-    Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry))
+fn transport_action(client: &Rc<RefCell<Option<KodiClient>>>, action: &str) {
+    if let Some(ref c) = *client.borrow() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        if let Ok(players) = rt.block_on(c.get_active_players()) {
+            if let Some(p) = players.first() {
+                match action {
+                    "play_pause" => { let _ = rt.block_on(c.play_pause(p.playerid)); }
+                    "stop" => { let _ = rt.block_on(c.stop(p.playerid)); }
+                    "previous" => { let _ = rt.block_on(c.go_to(p.playerid, "previous")); }
+                    "next" => { let _ = rt.block_on(c.go_to(p.playerid, "next")); }
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
-fn show_edit_host_dialog(host: &Host) -> Option<(gtk::Dialog, gtk::Entry, gtk::Entry, gtk::SpinButton, gtk::Entry, gtk::Entry)> {
-    let dialog = gtk::Dialog::new();
-    dialog.set_title(Some("Edit Host"));
-    dialog.set_modal(true);
-    dialog.set_default_size(350, 280);
-
-    let content = dialog.content_area();
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-    content.set_spacing(12);
-
-    let form = gtk::Grid::new();
-    form.set_row_spacing(8);
-    form.set_column_spacing(8);
-
-    let name_label = gtk::Label::new(Some("Name:"));
-    name_label.set_halign(gtk::Align::End);
-    let name_entry = gtk::Entry::new();
-    name_entry.set_text(&host.name);
-
-    let address_label = gtk::Label::new(Some("Address:"));
-    address_label.set_halign(gtk::Align::End);
-    let address_entry = gtk::Entry::new();
-    address_entry.set_text(&host.address);
-
-    let port_label = gtk::Label::new(Some("Port:"));
-    port_label.set_halign(gtk::Align::End);
-    let port_adjustment = gtk::Adjustment::new(host.port as f64, 1.0, 65535.0, 1.0, 10.0, 0.0);
-    let port_spin = gtk::SpinButton::new(Some(&port_adjustment), 1.0, 0);
-
-    let username_label = gtk::Label::new(Some("Username:"));
-    username_label.set_halign(gtk::Align::End);
-    let username_entry = gtk::Entry::new();
-    if let Some(ref user) = host.username {
-        username_entry.set_text(user);
+fn send_input(client: &Rc<RefCell<Option<KodiClient>>>, action: InputAction) {
+    if let Some(ref c) = *client.borrow() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _ = rt.block_on(c.input(action));
     }
-    username_entry.set_placeholder_text(Some("kodi (optional)"));
-
-    let password_label = gtk::Label::new(Some("Password:"));
-    password_label.set_halign(gtk::Align::End);
-    let password_entry = gtk::Entry::new();
-    if let Some(ref pass) = host.password {
-        password_entry.set_text(pass);
-    }
-    password_entry.set_placeholder_text(Some("password (optional)"));
-    password_entry.set_visibility(false);
-
-    form.attach(&name_label, 0, 0, 1, 1);
-    form.attach(&name_entry, 1, 0, 1, 1);
-    form.attach(&address_label, 0, 1, 1, 1);
-    form.attach(&address_entry, 1, 1, 1, 1);
-    form.attach(&port_label, 0, 2, 1, 1);
-    form.attach(&port_spin, 1, 2, 1, 1);
-    form.attach(&username_label, 0, 3, 1, 1);
-    form.attach(&username_entry, 1, 3, 1, 1);
-    form.attach(&password_label, 0, 4, 1, 1);
-    form.attach(&password_entry, 1, 4, 1, 1);
-
-    content.append(&form);
-
-    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-    dialog.add_button("Save", gtk::ResponseType::Ok);
-
-    Some((dialog, name_entry, address_entry, port_spin, username_entry, password_entry))
 }
 
-fn show_error_dialog(message: &str) {
-    let dialog = gtk::Dialog::new();
-    dialog.set_title(Some("Connection Error"));
-    dialog.set_modal(true);
-    dialog.set_default_size(400, 150);
+fn volume_change(client: &Rc<RefCell<Option<KodiClient>>>, delta: i32) {
+    if let Some(ref c) = *client.borrow() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        if let Ok(p) = rt.block_on(c.get_application_properties()) {
+            let new_vol = (p.volume + delta).clamp(0, 100);
+            let _ = rt.block_on(c.set_volume(new_vol));
+        }
+    }
+}
 
-    let content = dialog.content_area();
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-
-    let label = gtk::Label::new(Some(message));
-    label.set_wrap(true);
-    label.set_halign(gtk::Align::Start);
-    label.set_valign(gtk::Align::Start);
-    content.append(&label);
-
-    dialog.add_button("OK", gtk::ResponseType::Ok);
-
-    dialog.connect_response(|dialog, _| {
-        dialog.destroy();
-    });
-
-    dialog.show();
+fn volume_mute(client: &Rc<RefCell<Option<KodiClient>>>) {
+    if let Some(ref c) = *client.borrow() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        if let Ok(p) = rt.block_on(c.get_application_properties()) {
+            let _ = rt.block_on(c.set_mute(!p.muted));
+        }
+    }
 }

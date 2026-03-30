@@ -166,16 +166,6 @@ cargo clippy
 cargo fmt
 ```
 
-## Dependencies
-
-See `Cargo.toml` for all dependencies. Key ones:
-- `gtk4` / `relm4` - UI
-- `tokio` - Async runtime
-- `reqwest` - HTTP client
-- `serde` / `serde_json` - Serialization
-- `dns-sd` - Service discovery
-- `tracing` - Logging
-
 ## Important Learnings
 
 ### Relm4 0.9 quirks
@@ -285,3 +275,60 @@ The discovery service uses:
 - Multicast address: `239.255.255.250:1900`
 - MSEARCH request with headers: `MAN: "ssdp:discover"`, `MX: 3`, `ST: ssdp:all`
 - Parse `Location:` header for host IP and port
+
+### HTTP Basic Auth with Kodi
+
+reqwest does NOT automatically extract credentials from URL userinfo (`http://user:pass@host`).
+You must explicitly add the `Authorization` header:
+
+```rust
+use base64::Engine;
+
+// In KodiClient struct, store credentials:
+pub struct KodiClient {
+    client: Client,
+    base_url: String,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+// Create from Host struct:
+pub fn from_host(host: &Host) -> Self {
+    Self {
+        client: Client::builder()
+            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .expect("Failed to create HTTP client"),
+        base_url: format!("http://{}:{}", host.address, host.port),
+        username: host.username.clone(),
+        password: host.password.clone(),
+    }
+}
+
+// In call() method, add auth header:
+if let (Some(user), Some(pass)) = (&self.username, &self.password) {
+    let credentials = format!("{}:{}", user, pass);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+    req = req.header("Authorization", format!("Basic {}", encoded));
+}
+```
+
+### Creating KodiClient from Host
+
+Use `KodiClient::from_host(&host)` instead of `KodiClient::from_url(&host.url())` to properly handle credentials:
+
+```rust
+let client = KodiClient::from_host(host);  // Handles auth properly
+```
+
+### Dependencies
+
+Key dependencies (see `Cargo.toml`):
+- `gtk4` / `relm4` - UI
+- `tokio` - Async runtime  
+- `reqwest` - HTTP client
+- `serde` / `serde_json` - Serialization
+- `dns-sd` - Service discovery
+- `tracing` - Logging
+- `base64` - HTTP Basic Auth encoding

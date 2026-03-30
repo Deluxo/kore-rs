@@ -5,10 +5,10 @@ A Rust GTK4 desktop remote for Kodi media center.
 ## Overview
 
 - **Entry**: `src/main.rs` - declarative flow via `App::new().chain().run()`
-- **App**: `src/app.rs` - effect container, builder chain
+- **App**: `src/app.rs` - effect container, builder chain, UI construction
 - **Effects**: `src/effects/` - async effect trait definitions
 - **UI**: Relm4 0.9 + GTK4 (widget builders)
-- **Kodi**: JSON-RPC via HTTP (`reqwest`)
+- **Kodi**: JSON-RPC via HTTP (`reqwest`) with Basic Auth
 - **Discovery**: SSDP/UDP on `239.255.255.250:1900` (runs on main thread)
 - **Config**: `~/.config/korers/hosts.json`
 
