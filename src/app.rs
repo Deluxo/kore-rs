@@ -374,6 +374,7 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     // Seeker
     let seeker_adj = gtk::Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
     let seeker = Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
+    let adjustment_clone = seeker_adj.clone();
     seeker.set_hexpand(true);
     seeker.set_draw_value(false);
     
@@ -383,29 +384,9 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let was_seeking = Rc::new(RefCell::new(false));
     
     // Track when user manually adjusts the scale
-    let adjustment_clone = seeker_adj.clone();
-    let prev_value_clone = previous_poll_value.clone();
-    let was_seeking_clone = was_seeking.clone();
     let player_info_clone = player_info.clone();
     let client_clone = client.clone();
     let seeker_clone = seeker.clone();
-    seeker_clone.connect_value_changed(move |_scale| {
-        let curr = adjustment_clone.value();
-        let prev = *prev_value_clone.borrow();
-        
-        // Only trigger seek if value changed significantly (> 1%)
-        // This prevents polling from triggering seeks
-        if (curr - prev).abs() > 1.0 {
-            tracing::info!("Slider moved by user! {} -> {} (diff: {:.1})", prev, curr, curr - prev);
-            *was_seeking_clone.borrow_mut() = true;
-            if let Some((player_id, _)) = *player_info_clone.borrow() {
-                if let Some(ref c) = *client_clone.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
-                }
-            }
-        }
-    });
     
     // Initially set to prevent immediate seek on first poll
     *previous_poll_value.borrow_mut() = seeker_adj.value();
@@ -420,10 +401,18 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let seek_hint_clone = seek_hint.clone();
     let was_seeking_clone2 = was_seeking.clone();
     seeker_clone.connect_value_changed(move |_scale| {
+        let curr = adjustment_clone.value();
         let is_seeking = *was_seeking_clone2.borrow();
         if is_seeking {
             seek_hint_clone.set_label("✨ SEEKING... ✨");
             *was_seeking_clone2.borrow_mut() = false;
+
+            if let Some((player_id, _)) = *player_info_clone.borrow() {
+                if let Some(ref c) = *client_clone.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
+                }
+            }
         }
     });
     
