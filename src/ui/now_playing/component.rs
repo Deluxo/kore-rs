@@ -206,11 +206,13 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     box_.append(&description_label);
 
     let plot_label = gtk::Label::new(Some(""));
-    plot_label.set_halign(gtk::Align::Start);
+    plot_label.set_halign(gtk::Align::Center);
     plot_label.set_wrap(true);
     plot_label.set_wrap_mode(pango::WrapMode::Word);
     plot_label.set_hexpand(true);
     plot_label.set_size_request(300, -1);
+    plot_label.set_margin_start(8);
+    plot_label.set_margin_end(8);
     plot_label.set_lines(4);
     box_.append(&plot_label);
 
