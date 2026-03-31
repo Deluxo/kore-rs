@@ -183,7 +183,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     
     let poster_placeholder = gtk::Image::from_icon_name("media-video");
     poster_placeholder.set_icon_size(gtk::IconSize::Large);
-    poster_placeholder.set_size_request(300, 300);
+    poster_placeholder.set_size_request(100, 100);
     poster_placeholder.set_hexpand(true);
     poster_placeholder.set_vexpand(true);
     
