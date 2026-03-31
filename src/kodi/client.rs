@@ -20,7 +20,7 @@ pub enum ClientError {
     Request(String),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KodiClient {
     client: Client,
     base_url: String,
