@@ -11,7 +11,6 @@ pub struct NowPlayingWidgets {
     pub title_label: gtk::Label,
     pub description_label: gtk::Label,
     pub seeker: Scale,
-    pub seek_hint: gtk::Label,
     pub time_current: gtk::Label,
     pub time_remaining: gtk::Label,
     pub time_ends: gtk::Label,
@@ -129,6 +128,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
 
     let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     seeker_box.set_hexpand(true);
+    seeker_box.set_vexpand(false);
 
     let seeker_adj = Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
     let seeker = Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
@@ -136,35 +136,23 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     seeker.set_draw_value(false);
     seeker_box.append(&seeker);
 
-    let seek_hint = gtk::Label::new(Some("👆 tap to seek"));
-    seek_hint.set_halign(gtk::Align::Center);
-    seek_hint.set_margin_top(4);
-    seek_hint.set_hexpand(true);
-    seek_hint.set_css_classes(&["secondary"]);
-    seeker_box.append(&seek_hint);
-
     let is_seeking = state.is_seeking.clone();
     let gesture = gtk::GestureClick::new();
     gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
 
     let is_seeking_press = is_seeking.clone();
-    let seek_hint_press = seek_hint.clone();
     gesture.connect_pressed(move |_, _, _, _| {
         *is_seeking_press.borrow_mut() = true;
-        seek_hint_press.set_label("👆 dragging...");
     });
 
     let is_seeking_release = is_seeking.clone();
     let client_release = state.client.clone();
     let player_id_release = state.player_id;
-    let seek_hint_release = seek_hint.clone();
     let seeker_release = seeker.clone();
     gesture.connect_released(move |_, _, _, _| {
         let was_seeking = *is_seeking_release.borrow();
         if was_seeking {
             let curr = seeker_release.value();
-            seek_hint_release.set_label("✨ SEEKING... ✨");
-
             if let Some(ref c) = *client_release.borrow() {
                 if let Some(player_id) = player_id_release {
                     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -203,7 +191,6 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
         title_label,
         description_label,
         seeker,
-        seek_hint,
         time_current,
         time_remaining,
         time_ends,
@@ -226,7 +213,6 @@ pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayin
     widgets.time_current.set_text(&format_time(state.current_time));
     widgets.time_remaining.set_text(&format!("-{}", format_time(remaining)));
     widgets.time_ends.set_text(&format!("ends {}", end_ts.format("%H:%M")));
-    widgets.seek_hint.set_label("👆 tap to seek");
 }
 
 pub fn start_now_playing_polling(
