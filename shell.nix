@@ -3,7 +3,6 @@
 pkgs.mkShell {
     strictDeps = true;
     nativeBuildInputs = with pkgs; [
-      rustup
       cargo
       rustc
       pkg-config

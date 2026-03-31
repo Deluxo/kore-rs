@@ -2,7 +2,7 @@ use gtk::prelude::*;
 use gtk::Application;
 use gtk::glib;
 use gtk::pango;
-use gtk::{Scale, GestureClick};
+use gtk::Scale;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -371,25 +371,21 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     description.set_ellipsize(pango::EllipsizeMode::End);
     box_.append(&description);
 
-    // Seeker
+    // Seeker - wrap in box for gesture handling
+    let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    seeker_box.set_hexpand(true);
+    
     let seeker_adj = gtk::Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
     let seeker = Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
-    let adjustment_clone = seeker_adj.clone();
     seeker.set_hexpand(true);
     seeker.set_draw_value(false);
+    seeker_box.append(&seeker);
+    
+    // Track user interaction state
+    let is_seeking = Rc::new(RefCell::new(false));
     
     // For seek - store current player info
     let player_info: Rc<RefCell<Option<(i32, i64)>>> = Rc::new(RefCell::new(None));
-    let previous_poll_value = Rc::new(RefCell::new(0.0));
-    let was_seeking = Rc::new(RefCell::new(false));
-    
-    // Track when user manually adjusts the scale
-    let player_info_clone = player_info.clone();
-    let client_clone = client.clone();
-    let seeker_clone = seeker.clone();
-    
-    // Initially set to prevent immediate seek on first poll
-    *previous_poll_value.borrow_mut() = seeker_adj.value();
     
     // Visual feedback hint
     let seek_hint = gtk::Label::new(Some("👆 tap to seek"));
@@ -398,25 +394,41 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     seek_hint.set_hexpand(true);
     seek_hint.set_css_classes(&["secondary"]);
     
-    let seek_hint_clone = seek_hint.clone();
-    let was_seeking_clone2 = was_seeking.clone();
-    seeker_clone.connect_value_changed(move |_scale| {
-        let curr = adjustment_clone.value();
-        let is_seeking = *was_seeking_clone2.borrow();
-        if is_seeking {
-            seek_hint_clone.set_label("✨ SEEKING... ✨");
-            *was_seeking_clone2.borrow_mut() = false;
-
-            if let Some((player_id, _)) = *player_info_clone.borrow() {
-                if let Some(ref c) = *client_clone.borrow() {
+    // Use gesture click on parent box with CAPTURE phase to get press/release
+    let gesture = gtk::GestureClick::new();
+    gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+    
+    let is_seeking_press = is_seeking.clone();
+    let seek_hint_press = seek_hint.clone();
+    gesture.connect_pressed(move |_gesture, _n_press, _x, _y| {
+        *is_seeking_press.borrow_mut() = true;
+        seek_hint_press.set_label("👆 dragging...");
+    });
+    
+    let is_seeking_release = is_seeking.clone();
+    let player_info_release = player_info.clone();
+    let client_release = client.clone();
+    let seek_hint_release = seek_hint.clone();
+    let seeker_release = seeker.clone();
+    gesture.connect_released(move |_gesture, _n_press, _x, _y| {
+        let was_seeking = *is_seeking_release.borrow();
+        if was_seeking {
+            let curr = seeker_release.value();
+            seek_hint_release.set_label("✨ SEEKING... ✨");
+            
+            if let Some((player_id, _)) = *player_info_release.borrow() {
+                if let Some(ref c) = *client_release.borrow() {
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     let _ = rt.block_on(c.seek_percentage(player_id, curr));
                 }
             }
         }
+        *is_seeking_release.borrow_mut() = false;
     });
     
-    box_.append(&seeker);
+    seeker_box.add_controller(gesture);
+    
+    box_.append(&seeker_box);
     box_.append(&seek_hint);
 
     // Time labels: current | remaining | ends at
@@ -449,6 +461,7 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let player_info_poll = player_info.clone();
     let client_poll = client.clone();
     let seek_hint_clone = seek_hint.clone();
+    let is_seeking_poll = is_seeking.clone();
     glib::source::timeout_add_seconds_local(1, move || {
         let title2 = title_clone.clone();
         let desc2 = desc_clone.clone();
@@ -456,6 +469,7 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
         let time_cur2 = time_cur_clone.clone();
         let time_rem2 = time_rem_clone.clone();
         let time_ends2 = time_ends_clone.clone();
+        let is_seeking2 = is_seeking_poll.clone();
         
         if let Some(ref c) = *client_poll.borrow() {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -517,10 +531,14 @@ fn create_now_playing_box(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
                          let tr2 = time_rem2.clone();
                          let te2 = time_ends2.clone();
                          let sh2 = seek_hint_clone.clone();
+                         let is_seeking3 = is_seeking2.clone();
                          glib::idle_add_local_once(move || {
                              t2.set_markup(&format!("<big><b>{}</b></big>", label));
                              d2.set_text(&desc);
-                             s2.set_value(percent);
+                             // Only update seeker if user is not actively seeking
+                             if !*is_seeking3.borrow() {
+                                 s2.set_value(percent);
+                             }
                              sh2.set_label("👆 tap to seek");
                              tc2.set_text(&format_time(cur_time));
                              tr2.set_text(&format!("-{}", format_time(duration - cur_time)));
