@@ -21,6 +21,7 @@ impl App {
         let app = Application::builder()
             .application_id("org.korers.app")
             .build();
+        
         Self {
             app,
             hosts: Vec::new(),
@@ -52,6 +53,10 @@ impl App {
         let host_manager = self.host_manager.clone();
 
         self.app.connect_activate(move |app| {
+            if let Some(settings) = gtk::Settings::default() {
+                settings.set_property("gtk-application-prefer-dark-theme", true);
+            }
+            
             let window = create_main_window(app);
             let header = create_header_bar(&host_manager, &hosts);
             let client = auto_connect_first_host(&hosts);
