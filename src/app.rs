@@ -145,6 +145,8 @@ fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
         .vexpand(true)
         .build();
 
+        content.set_homogeneous(true);
+
     let (now_playing, np_widgets, np_state) = create_now_playing(client.clone());
     start_now_playing_polling(np_widgets, np_state);
     content.append(&now_playing);
