@@ -35,6 +35,14 @@ pub struct SystemInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Art {
+    pub poster: Option<String>,
+    pub fanart: Option<String>,
+    pub banner: Option<String>,
+    pub thumb: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerItem {
     pub id: i32,
     pub r#type: String,
@@ -48,6 +56,7 @@ pub struct PlayerItem {
     pub file: Option<String>,
     pub thumbnail: Option<String>,
     pub fanart: Option<String>,
+    pub art: Option<Art>,
     pub year: Option<i32>,
     pub runtime: Option<i32>,
     pub duration: Option<f64>,

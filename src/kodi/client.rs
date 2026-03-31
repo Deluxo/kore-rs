@@ -73,6 +73,86 @@ impl KodiClient {
         self
     }
 
+    pub async fn get_thumbnail(&self, url: &str) -> Result<Vec<u8>, ClientError> {
+        // Check for remote URLs FIRST (fanart.tv, etc.) - these come as "image://https://..."
+        let is_remote = (url.contains("fanart.tv") || url.contains("assets.fanart.tv") || url.contains("https://"));
+        
+        if is_remote {
+            let url_to_fetch = if url.starts_with("image://") {
+                url.trim_start_matches("image://")
+                    .replace("%3a", ":")
+                    .replace("%2f", "/")
+            } else {
+                url.to_string()
+            };
+            let url_to_fetch = url_to_fetch.trim_end_matches('/').to_string();
+
+            tracing::info!("Fetching remote thumbnail: {}", url_to_fetch);
+            
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .map_err(ClientError::Network)?;
+            
+            let result = client.get(&url_to_fetch).send().await;
+            
+            match result {
+                Ok(response) => {
+                    tracing::info!("Remote status: {:?}", response.status());
+                    if response.status().is_success() {
+                        let bytes = response.bytes().await.map_err(ClientError::Network)?;
+                        tracing::info!("Remote got {} bytes", bytes.len());
+                        return Ok(bytes.to_vec());
+                    }
+                    if response.status().as_u16() == 301 || response.status().as_u16() == 302 {
+                        if let Some(location) = response.headers().get("location") {
+                            let redirect_url = location.to_str().unwrap_or(&url_to_fetch).to_string();
+                            tracing::info!("Following redirect to: {}", redirect_url);
+                            let response = client.get(&redirect_url).send().await?;
+                            if response.status().is_success() {
+                                let bytes = response.bytes().await.map_err(ClientError::Network)?;
+                                return Ok(bytes.to_vec());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Request failed: {}", e);
+                }
+            }
+            
+            return Err(ClientError::Request("Failed to get thumbnail".to_string()));
+        }
+        
+        // Local path - try Files.PrepareDownload
+        if url.starts_with("image://") {
+            let path = url.trim_start_matches("image://").trim_end_matches('/');
+            
+            tracing::debug!("Preparing download for local path: {}", path);
+            
+            let download_path = self.prepare_download(path).await?;
+            let endpoint = format!("{}/{}", self.base_url, download_path);
+            tracing::debug!("Download endpoint: {}", endpoint);
+            
+            let mut request = self.client.get(&endpoint);
+            if let (Some(user), Some(pass)) = (&self.username, &self.password) {
+                let credentials = format!("{}:{}", user, pass);
+                let encoded_auth = base64::engine::general_purpose::STANDARD.encode(credentials);
+                request = request.header("Authorization", format!("Basic {}", encoded_auth));
+            }
+            
+            let response = request.send().await?;
+            if response.status().is_success() {
+                let bytes = response.bytes().await.map_err(ClientError::Network)?;
+                return Ok(bytes.to_vec());
+            }
+            
+            return Err(ClientError::Request(format!("Failed to download: {}", response.status())));
+        }
+        
+        Err(ClientError::Request("Unknown image URL format".to_string()))
+    }
+
     async fn call<R: for<'de> Deserialize<'de> + Sized>(
         &self,
         request: JsonRpcRequest,
@@ -228,6 +308,7 @@ impl KodiClient {
                         "year".to_string(),
                         "runtime".to_string(),
                         "duration".to_string(),
+                        "art".to_string(),
                     ],
                 }),
             )
@@ -636,6 +717,20 @@ impl KodiClient {
 
         let result: FavouritesResult = self.call(JsonRpcRequest::new("Favourites.GetFavourites")).await?;
         Ok(result.favourites)
+    }
+
+    pub async fn prepare_download(&self, path: &str) -> Result<String, ClientError> {
+        #[derive(Deserialize)]
+        struct PrepareDownloadResult {
+            path: String,
+        }
+
+        let result: PrepareDownloadResult = self
+            .call(
+                JsonRpcRequest::new("Files.PrepareDownload").with_params(serde_json::json!({ "path": path }))
+            )
+            .await?;
+        Ok(result.path)
     }
 }
 
