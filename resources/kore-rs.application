@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Kore
+Comment=Kore but in rust
+Exec=/usr/bin/korers
+Icon=korers
+Terminal=false
+Type=Application
+Categories=Utility;GTK;
