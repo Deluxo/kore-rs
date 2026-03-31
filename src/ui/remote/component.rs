@@ -180,10 +180,10 @@ pub fn connect_remote_handlers(widgets: &RemoteWidgets, state: &RemoteState) {
     widgets.btn_mute.connect_clicked(move |_| volume_mute(&client));
     
     let client = state.client.clone();
-    widgets.btn_voldown.connect_clicked(move |_| volume_change(&client, -10));
+    widgets.btn_voldown.connect_clicked(move |_| volume_change(&client, -2));
     
     let client = state.client.clone();
-    widgets.btn_volup.connect_clicked(move |_| volume_change(&client, 10));
+    widgets.btn_volup.connect_clicked(move |_| volume_change(&client, 2));
 }
 
 fn transport_action(client: &Rc<RefCell<Option<KodiClient>>>, action: &str) {
