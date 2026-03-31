@@ -1,7 +1,7 @@
 use gtk::glib;
 use gtk::pango;
 use gtk::prelude::*;
-use gtk::{Scale, Adjustment};
+use gtk::Scale;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -23,7 +23,7 @@ pub struct NowPlayingState {
     pub current_time: i64,
     pub duration: i64,
     pub is_seeking: Rc<RefCell<bool>>,
-    pub player_id: Option<i32>,
+    player_info: Rc<RefCell<Option<(i32, i64)>>>,
 }
 
 impl NowPlayingState {
@@ -35,7 +35,7 @@ impl NowPlayingState {
             current_time: 0,
             duration: 0,
             is_seeking: Rc::new(RefCell::new(false)),
-            player_id: None,
+            player_info: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -53,7 +53,7 @@ impl NowPlayingState {
             let rt = tokio::runtime::Runtime::new().unwrap();
             if let Ok(players) = rt.block_on(c.get_active_players()) {
                 if let Some(p) = players.first() {
-                    self.player_id = Some(p.playerid);
+                    *self.player_info.borrow_mut() = Some((p.playerid, self.duration));
 
                     if let Ok(item) = rt.block_on(c.get_current_item(p.playerid)) {
                         let title = item.title.clone()
@@ -86,18 +86,10 @@ impl NowPlayingState {
             }
         }
     }
-
-    pub fn seek(&self, percent: f64) {
-        let client = self.client.borrow();
-        if let (Some(ref c), Some(player_id)) = (&*client, self.player_id) {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let _ = rt.block_on(c.seek_percentage(player_id, percent));
-        }
-    }
 }
 
 pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, NowPlayingWidgets, NowPlayingState) {
-    let state = NowPlayingState::new(client);
+    let state = NowPlayingState::new(client.clone());
     
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 8);
     box_.set_margin_start(12);
@@ -126,45 +118,45 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     description_label.set_ellipsize(pango::EllipsizeMode::End);
     box_.append(&description_label);
 
+    // Seeker - wrap in box for gesture handling
     let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     seeker_box.set_hexpand(true);
-    seeker_box.set_vexpand(false);
-
-    let seeker_adj = Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
+    
+    let seeker_adj = gtk::Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
     let seeker = Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
     seeker.set_hexpand(true);
     seeker.set_draw_value(false);
     seeker_box.append(&seeker);
-
-    let is_seeking = state.is_seeking.clone();
-    let gesture = gtk::GestureClick::new();
-    gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
-
-    let is_seeking_press = is_seeking.clone();
-    gesture.connect_pressed(move |_, _, _, _| {
-        *is_seeking_press.borrow_mut() = true;
-    });
-
-    let is_seeking_release = is_seeking.clone();
-    let client_release = state.client.clone();
-    let player_id_release = state.player_id;
-    let seeker_release = seeker.clone();
-    gesture.connect_released(move |_, _, _, _| {
-        let was_seeking = *is_seeking_release.borrow();
-        if was_seeking {
-            let curr = seeker_release.value();
-            if let Some(ref c) = *client_release.borrow() {
-                if let Some(player_id) = player_id_release {
+    
+    // Track user interaction state
+    let player_info = state.player_info.clone();
+    let client_for_adj = client.clone();
+    let previous_value = Rc::new(RefCell::new(0.0f64));
+    
+    // Store initial value
+    *previous_value.borrow_mut() = seeker_adj.value();
+    
+    // Use scale's value-changed to detect user interaction
+    let player_info_adj = player_info.clone();
+    let client_adj = client_for_adj.clone();
+    let prev_val = previous_value.clone();
+    seeker_adj.connect_value_changed(move |adj| {
+        let curr = adj.value();
+        let prev = *prev_val.borrow();
+        
+        // Only seek if value actually changed (user dragged)
+        if (curr - prev).abs() > 0.5 {
+            *prev_val.borrow_mut() = curr;
+            
+            if let Some((player_id, _)) = *player_info_adj.borrow() {
+                if let Some(ref c) = *client_adj.borrow() {
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     let _ = rt.block_on(c.seek_percentage(player_id, curr));
                 }
             }
         }
-        *is_seeking_release.borrow_mut() = false;
     });
-
-    seeker_box.add_controller(gesture);
-
+    
     box_.append(&seeker_box);
 
     let time_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -203,9 +195,7 @@ pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayin
     widgets.title_label.set_markup(&format!("<big><b>{}</b></big>", state.title));
     widgets.description_label.set_text(&state.description);
 
-    if !*state.is_seeking.borrow() {
-        widgets.seeker.set_value(state.percentage());
-    }
+    widgets.seeker.set_value(state.percentage());
 
     let remaining = state.duration - state.current_time;
     let end_ts = chrono::Local::now() + chrono::Duration::seconds(remaining);
