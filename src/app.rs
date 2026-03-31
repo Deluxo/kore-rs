@@ -6,7 +6,7 @@ use std::rc::Rc;
 use crate::host::Host;
 use crate::host::manager::HostManager;
 use crate::kodi::KodiClient;
-use crate::ui::host_list::{create_host_manager_popover, connect_host_list_handlers, HostListState};
+use crate::ui::host_list::{create_host_manager_dialog, connect_host_dialog_handlers, HostListState};
 use crate::ui::now_playing::{create_now_playing, start_now_playing_polling};
 use crate::ui::remote::{create_remote, connect_remote_handlers};
 
@@ -103,15 +103,23 @@ fn create_header_bar(
         .show_title_buttons(true)
         .build();
 
-    let menu_btn = gtk::MenuButton::builder().icon_name("open-menu").build();
-    
+    let hosts_btn = gtk::Button::builder()
+        .icon_name("computer")
+        .tooltip_text("Manage hosts")
+        .build();
+
     let client: Rc<RefCell<Option<KodiClient>>> = Rc::new(RefCell::new(None));
-    let (popover, widgets) = create_host_manager_popover(hosts);
+    let (dialog, widgets) = create_host_manager_dialog(hosts);
     let state = HostListState::new(host_manager.clone(), client);
-    connect_host_list_handlers(&widgets, &state);
-    menu_btn.set_popover(Some(&popover));
+    connect_host_dialog_handlers(&dialog, &widgets, &state);
+
+    let dialog = dialog.clone();
+    hosts_btn.connect_clicked(move |_| {
+        dialog.show();
+        dialog.present();
+    });
     
-    header.pack_start(&menu_btn);
+    header.pack_start(&hosts_btn);
     header
 }
 

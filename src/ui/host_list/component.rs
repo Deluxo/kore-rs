@@ -41,13 +41,19 @@ pub fn create_host_list(hosts: &[Host]) -> gtk::ListBox {
     list
 }
 
-pub fn create_host_manager_popover(
+pub fn create_host_manager_dialog(
     hosts: &[Host],
-) -> (gtk::Popover, HostListWidgets) {
-    let popover = gtk::Popover::new();
+) -> (gtk::Dialog, HostListWidgets) {
+    let dialog = gtk::Dialog::with_buttons(
+        Some("Hosts"),
+        None::<&gtk::Window>,
+        gtk::DialogFlags::MODAL,
+        &[
+            ("Close", gtk::ResponseType::Close),
+        ],
+    );
 
     let host_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    host_box.set_width_request(320);
     host_box.set_margin_start(12);
     host_box.set_margin_end(12);
     host_box.set_margin_top(12);
@@ -77,7 +83,7 @@ pub fn create_host_manager_popover(
     btns.append(&btn_del);
     host_box.append(&btns);
 
-    popover.set_child(Some(&host_box));
+    dialog.content_area().append(&host_box);
 
     let widgets = HostListWidgets {
         list,
@@ -88,10 +94,10 @@ pub fn create_host_manager_popover(
         btn_del,
     };
 
-    (popover, widgets)
+    (dialog, widgets)
 }
 
-pub fn connect_host_list_handlers(widgets: &HostListWidgets, state: &HostListState) {
+pub fn connect_host_dialog_handlers(dialog: &gtk::Dialog, widgets: &HostListWidgets, state: &HostListState) {
     let mgr = state.host_manager.clone();
     widgets.btn_discover.connect_clicked(move |_| {
         let discovery = DiscoveryService::new();
@@ -178,6 +184,13 @@ pub fn connect_host_list_handlers(widgets: &HostListWidgets, state: &HostListSta
         let selected = row.is_some();
         edit.set_sensitive(selected);
         del.set_sensitive(selected);
+    });
+
+    let dialog = dialog.clone();
+    dialog.connect_response(move |dlg, resp| {
+        if resp == gtk::ResponseType::Close {
+            dlg.close();
+        }
     });
 }
 

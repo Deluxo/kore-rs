@@ -1,3 +1,3 @@
 pub mod component;
 
-pub use component::{create_host_manager_popover, connect_host_list_handlers, HostListState};
+pub use component::{create_host_manager_dialog, connect_host_dialog_handlers, HostListState};
