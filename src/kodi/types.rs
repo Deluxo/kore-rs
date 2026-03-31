@@ -45,7 +45,8 @@ pub struct Art {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerItem {
     pub id: i32,
-    pub r#type: String,
+    #[serde(rename = "type")]
+    pub r#type: Option<String>,
     pub title: Option<String>,
     pub label: Option<String>,
     pub artist: Option<Vec<String>>,
@@ -60,6 +61,8 @@ pub struct PlayerItem {
     pub year: Option<i32>,
     pub runtime: Option<i32>,
     pub duration: Option<f64>,
+    pub plot: Option<String>,
+    pub tagline: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,6 +10,7 @@ use crate::kodi::KodiClient;
 pub struct NowPlayingWidgets {
     pub title_label: gtk::Label,
     pub description_label: gtk::Label,
+    pub plot_label: gtk::Label,
     pub seeker: Scale,
     pub time_current: gtk::Label,
     pub time_remaining: gtk::Label,
@@ -22,6 +23,7 @@ pub struct NowPlayingState {
     client: Rc<RefCell<Option<KodiClient>>>,
     pub title: String,
     pub description: String,
+    pub plot: String,
     pub current_time: i64,
     pub duration: i64,
     pub is_seeking: Rc<RefCell<bool>>,
@@ -36,6 +38,7 @@ impl NowPlayingState {
             client,
             title: "No media playing".to_string(),
             description: String::new(),
+            plot: String::new(),
             current_time: 0,
             duration: 0,
             is_seeking: Rc::new(RefCell::new(false)),
@@ -57,34 +60,52 @@ impl NowPlayingState {
         let client = self.client.borrow();
         if let Some(ref c) = *client {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            if let Ok(players) = rt.block_on(c.get_active_players()) {
+            let players = rt.block_on(c.get_active_players());
+            tracing::debug!("Poll - players: {:?}", players);
+            
+            if let Ok(players) = players {
                 if let Some(p) = players.first() {
+                    tracing::info!("Found player with id: {}", p.playerid);
                     *self.player_info.borrow_mut() = Some((p.playerid, self.duration));
 
-                    if let Ok(item) = rt.block_on(c.get_current_item(p.playerid)) {
+                    let item = rt.block_on(c.get_current_item(p.playerid));
+                    tracing::debug!("Poll - item: {:?}", item);
+
+                    if let Ok(item) = item {
                         let title = item.title.clone()
                             .or(item.label.clone())
                             .or(item.file.clone())
                             .unwrap_or_else(|| "Playing".to_string());
 
                         let mut desc_parts = Vec::new();
-                        if let Some(artist) = item.artist {
-                            desc_parts.push(artist.join(", "));
-                        }
-                        if let Some(album) = item.album {
-                            desc_parts.push(album);
-                        }
-                        if let Some(show) = item.showtitle {
-                            if let (Some(season), Some(episode)) = (item.season, item.episode) {
-                                desc_parts.push(format!("S{:02}E{:02}", season, episode));
+                        let media_type = item.r#type.as_deref().unwrap_or("unknown");
+                        
+                        if media_type == "episode" {
+                            // TV show - show SxxExx and show title
+                            if let Some(show) = item.showtitle {
+                                if let (Some(season), Some(episode)) = (item.season, item.episode) {
+                                    desc_parts.push(format!("S{:02}E{:02}", season, episode));
+                                }
+                                desc_parts.push(show);
                             }
-                            desc_parts.push(show);
+                        } else if media_type == "song" || media_type == "unknown" {
+                            // Music - show artist + album
+                            if let Some(artist) = item.artist {
+                                desc_parts.push(artist.join(", "));
+                            }
+                            if let Some(album) = item.album {
+                                desc_parts.push(album);
+                            }
                         }
+                        // For movies ("movie"), don't add anything to description - title is enough
+                        
                         self.description = desc_parts.join(" • ");
                         self.title = title;
+                        self.plot = item.plot.clone().unwrap_or_else(|| item.tagline.clone().unwrap_or_default());
 
                         tracing::debug!("item.thumbnail: {:?}", item.thumbnail);
                         tracing::debug!("item.art: {:?}", item.art);
+                        tracing::debug!("item.plot: {:?}", item.plot);
                         
                         // If art exists, use poster from it (fanart.tv), otherwise use thumbnail
                         if let Some(art) = &item.art {
@@ -122,6 +143,7 @@ impl NowPlayingState {
                     // No active player - reset state
                     self.title = "No media playing".to_string();
                     self.description = String::new();
+                    self.plot = String::new();
                     self.thumbnail = None;
                     self.current_time = 0;
                     self.duration = 0;
@@ -178,10 +200,19 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     box_.append(&title_label);
 
     let description_label = gtk::Label::new(Some(""));
-    description_label.set_halign(gtk::Align::Center);
+    description_label.set_halign(gtk::Align::Start);
     description_label.set_hexpand(true);
     description_label.set_ellipsize(pango::EllipsizeMode::End);
     box_.append(&description_label);
+
+    let plot_label = gtk::Label::new(Some(""));
+    plot_label.set_halign(gtk::Align::Start);
+    plot_label.set_wrap(true);
+    plot_label.set_wrap_mode(pango::WrapMode::Word);
+    plot_label.set_hexpand(true);
+    plot_label.set_size_request(300, -1);
+    plot_label.set_lines(4);
+    box_.append(&plot_label);
 
     // Seeker - wrap in box for gesture handling
     let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -247,6 +278,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     let widgets = NowPlayingWidgets {
         title_label,
         description_label,
+        plot_label,
         seeker,
         time_current,
         time_remaining,
@@ -261,6 +293,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
 pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayingState, client: &Rc<RefCell<Option<KodiClient>>>) {
     widgets.title_label.set_markup(&format!("<big><b>{}</b></big>", state.title));
     widgets.description_label.set_text(&state.description);
+    widgets.plot_label.set_text(&state.plot);
 
     widgets.seeker.set_value(state.percentage());
 

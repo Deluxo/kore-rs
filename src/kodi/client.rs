@@ -280,9 +280,12 @@ impl KodiClient {
     }
 
     pub async fn get_current_item(&self, player_id: i32) -> Result<PlayerItem, ClientError> {
+        tracing::debug!("get_current_item called with player_id: {}", player_id);
+        
         #[derive(Serialize)]
         struct Params {
-            playerid: i32,
+            #[serde(rename = "playerid")]
+            player_id: i32,
             properties: Vec<String>,
         }
 
@@ -291,28 +294,32 @@ impl KodiClient {
             item: PlayerItem,
         }
 
-        let result: ItemResult = self
-            .call(
-                JsonRpcRequest::new("Player.GetItem").with_params(Params {
-                    playerid: player_id,
-                    properties: vec![
-                        "title".to_string(),
-                        "artist".to_string(),
-                        "album".to_string(),
-                        "showtitle".to_string(),
-                        "season".to_string(),
-                        "episode".to_string(),
-                        "file".to_string(),
-                        "thumbnail".to_string(),
-                        "fanart".to_string(),
-                        "year".to_string(),
-                        "runtime".to_string(),
-                        "duration".to_string(),
-                        "art".to_string(),
-                    ],
-                }),
-            )
-            .await?;
+        let request = JsonRpcRequest::new("Player.GetItem").with_params(Params {
+            player_id,
+            properties: vec![
+                "title".to_string(),
+                "artist".to_string(),
+                "album".to_string(),
+                "showtitle".to_string(),
+                "season".to_string(),
+                "episode".to_string(),
+                "file".to_string(),
+                "thumbnail".to_string(),
+                "fanart".to_string(),
+                "year".to_string(),
+                "runtime".to_string(),
+                "duration".to_string(),
+                "art".to_string(),
+                "plot".to_string(),
+                "tagline".to_string(),
+            ],
+        });
+        
+        tracing::debug!("Request: {:?}", request);
+        
+        let result: ItemResult = self.call(request).await?;
+        
+        tracing::debug!("Got item: {:?}", result.item);
         Ok(result.item)
     }
 
@@ -737,8 +744,9 @@ impl KodiClient {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivePlayer {
     pub playerid: i32,
-    pub playertype: String,
-    pub r#type: String,
+    #[serde(rename = "type")]
+    pub r#type: Option<String>,
+    pub playertype: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
