@@ -68,6 +68,8 @@ pub fn create_remote(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, Remo
     let dpad = gtk::Grid::new();
     dpad.set_column_homogeneous(true);
     dpad.set_row_homogeneous(true);
+    dpad.set_column_spacing(8);
+    dpad.set_row_spacing(8);
     dpad.set_hexpand(true);
     dpad.set_vexpand(true);
 
