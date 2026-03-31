@@ -2,7 +2,7 @@
 Name=Kore
 Comment=Kore but in rust
 Exec=/usr/bin/korers
-Icon=korers
+Icon=./icon.png
 Terminal=false
 Type=Application
 Categories=Utility;GTK;
