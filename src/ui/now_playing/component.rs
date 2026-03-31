@@ -23,8 +23,8 @@ pub struct NowPlayingState {
     pub description: String,
     pub current_time: i64,
     pub duration: i64,
-    pub is_seeking: bool,
-    player_id: Option<i32>,
+    pub is_seeking: Rc<RefCell<bool>>,
+    pub player_id: Option<i32>,
 }
 
 impl NowPlayingState {
@@ -35,7 +35,7 @@ impl NowPlayingState {
             description: String::new(),
             current_time: 0,
             duration: 0,
-            is_seeking: false,
+            is_seeking: Rc::new(RefCell::new(false)),
             player_id: None,
         }
     }
@@ -127,7 +127,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     description_label.set_ellipsize(pango::EllipsizeMode::End);
     box_.append(&description_label);
 
-    let seeker_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     seeker_box.set_hexpand(true);
 
     let seeker_adj = Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
@@ -142,6 +142,41 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     seek_hint.set_hexpand(true);
     seek_hint.set_css_classes(&["secondary"]);
     seeker_box.append(&seek_hint);
+
+    let is_seeking = state.is_seeking.clone();
+    let gesture = gtk::GestureClick::new();
+    gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+
+    let is_seeking_press = is_seeking.clone();
+    let seek_hint_press = seek_hint.clone();
+    gesture.connect_pressed(move |_, _, _, _| {
+        *is_seeking_press.borrow_mut() = true;
+        seek_hint_press.set_label("👆 dragging...");
+    });
+
+    let is_seeking_release = is_seeking.clone();
+    let client_release = state.client.clone();
+    let player_id_release = state.player_id;
+    let seek_hint_release = seek_hint.clone();
+    let seeker_release = seeker.clone();
+    gesture.connect_released(move |_, _, _, _| {
+        let was_seeking = *is_seeking_release.borrow();
+        if was_seeking {
+            let curr = seeker_release.value();
+            seek_hint_release.set_label("✨ SEEKING... ✨");
+
+            if let Some(ref c) = *client_release.borrow() {
+                if let Some(player_id) = player_id_release {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
+                }
+            }
+        }
+        *is_seeking_release.borrow_mut() = false;
+    });
+
+    seeker_box.add_controller(gesture);
+
     box_.append(&seeker_box);
 
     let time_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -181,7 +216,7 @@ pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayin
     widgets.title_label.set_markup(&format!("<big><b>{}</b></big>", state.title));
     widgets.description_label.set_text(&state.description);
 
-    if !state.is_seeking {
+    if !*state.is_seeking.borrow() {
         widgets.seeker.set_value(state.percentage());
     }
 
