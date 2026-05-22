@@ -1,96 +1,67 @@
-name: Build & Release
+name: Build Linux ARM64
 
 on:
   push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: write
+    branches: [ "main" ]
 
 jobs:
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-          - target: aarch64-unknown-linux-gnu
+  build-arm64:
+    name: Build (Linux ARM64)
+    runs-on: ubuntu-22.04-arm
+
+    env:
+      PROJECT_NAME: korers
 
     steps:
-      # 1️⃣ Checkout your repo
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Install Rust
+      # ----------------------------
+      # System dependencies (GTK4 stack)
+      # ----------------------------
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libavahi-compat-libdnssd-dev
+      # ----------------------------
+      # Rust toolchain
+      # ----------------------------
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
 
-      # 3️⃣ Add Rust target
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
+      # Optional caching (speeds up rebuilds)
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      # 4️⃣ Install system dependencies for GTK (x86_64 only)
-      - name: Install GTK & GLib dependencies
+      # ----------------------------
+      # Build release binary
+      # ----------------------------
+      - name: Build release
         run: |
-          sudo apt update
-          sudo apt install -y \
-            libavahi-compat-libdnssd-dev \
-            libcairo2-dev \
-            libgdk-pixbuf-2.0-dev \
-            libglib2.0-dev \
-            libgtk-4-dev \
-            libpango1.0-dev \
-            libwayland-dev \
-            libx11-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            libxrandr-dev \
-            pkg-config \
-            curl
+          cargo build --release --target aarch64-unknown-linux-gnu
 
-      # 5️⃣ Install cross for ARM builds
-      - name: Install cross
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo install cross
-
-      # 6️⃣ Build
-      - name: Build
-        run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
-
-      # 7️⃣ Package binaries
+      # ----------------------------
+      # Package artifact
+      # ----------------------------
       - name: Package binary
         run: |
+          BIN_OUTPUT="target/aarch64-unknown-linux-gnu/release/${PROJECT_NAME}"
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/korers dist/korers-${{ matrix.target }}
-          tar -czf korers-${{ matrix.target }}.tar.gz -C dist korers-${{ matrix.target }}
+          cp "$BIN_OUTPUT" "dist/${PROJECT_NAME}-linux-arm64"
 
-      # 8️⃣ Upload artifacts
-      - name: Upload artifact
+      # ----------------------------
+      # Upload artifact
+      # ----------------------------
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: korers-${{ matrix.target }}
-          path: korers-${{ matrix.target }}.tar.gz
-
-  release:
-    name: Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      # 1️⃣ Download built artifacts
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-
-      # 2️⃣ Create GitHub release
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            **/*.tar.gz
+          name: korers-linux-arm64
+          path: dist/
