@@ -3,6 +3,7 @@ name: Build Linux ARM64
 on:
   push:
     branches: [ "main" ]
+    tags: [ 'v*' ]
 
 jobs:
   build-arm64:
@@ -58,10 +59,55 @@ jobs:
           cp "$BIN_OUTPUT" "dist/${PROJECT_NAME}-linux-arm64"
 
       # ----------------------------
-      # Upload artifact
+      # Build .deb package
+      # ----------------------------
+      - name: Build .deb package
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          DEB_DIR="dist/deb"
+          mkdir -p "${DEB_DIR}/DEBIAN"
+          mkdir -p "${DEB_DIR}/usr/bin"
+          mkdir -p "${DEB_DIR}/usr/share/applications"
+          mkdir -p "${DEB_DIR}/usr/share/icons/hicolor/256x256/apps"
+
+          cp "target/aarch64-unknown-linux-gnu/release/${PROJECT_NAME}" "${DEB_DIR}/usr/bin/korers"
+          cp resources/kore-rs.desktop "${DEB_DIR}/usr/share/applications/"
+          cp resources/icon.png "${DEB_DIR}/usr/share/icons/hicolor/256x256/apps/korers.png"
+
+          cat > "${DEB_DIR}/DEBIAN/control" << EOF
+Package: korers
+Version: ${VERSION}
+Section: utils
+Priority: optional
+Architecture: arm64
+Maintainer: Korers Developers
+Description: A Rust desktop remote control for Kodi
+ A GTK4-based remote control application for Kodi media center,
+ built with Rust and Relm4.
+EOF
+
+          dpkg-deb --build "${DEB_DIR}" "dist/korers_${VERSION}_arm64.deb"
+
+      # ----------------------------
+      # Upload artifacts
       # ----------------------------
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: korers-linux-arm64
           path: dist/
+      - name: Upload .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: korers-arm64-deb
+          path: dist/*.deb
+
+      # ----------------------------
+      # GitHub Release (tag pushes only)
+      # ----------------------------
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -2,7 +2,7 @@
 Name=Kore
 Comment=Kore but in rust
 Exec=/usr/bin/korers
-Icon=./icon.png
+Icon=korers
 Terminal=false
 StartupWMClass=org.korers.app
 Type=Application
