@@ -71,7 +71,7 @@ impl NowPlayingState {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let players = rt.block_on(c.get_active_players());
             tracing::debug!("Poll - players: {:?}", players);
-            
+
             if let Ok(players) = players {
                 if let Some(p) = players.first() {
                     tracing::info!("Found player with id: {}", p.playerid);
@@ -126,7 +126,7 @@ impl NowPlayingState {
 
                         let mut desc_parts = Vec::new();
                         let media_type = item.r#type.as_deref().unwrap_or("unknown");
-                        
+
                         if media_type == "episode" {
                             // TV show - show SxxExx and show title
                             if let Some(show) = item.showtitle {
@@ -145,7 +145,7 @@ impl NowPlayingState {
                             }
                         }
                         // For movies ("movie"), don't add anything to description - title is enough
-                        
+
                         self.description = desc_parts.join(" • ");
                         self.title = title;
                         self.plot = item.plot.clone().unwrap_or_else(|| item.tagline.clone().unwrap_or_default());
@@ -153,7 +153,7 @@ impl NowPlayingState {
                         tracing::debug!("item.thumbnail: {:?}", item.thumbnail);
                         tracing::debug!("item.art: {:?}", item.art);
                         tracing::debug!("item.plot: {:?}", item.plot);
-                        
+
                         // If art exists, use poster from it (fanart.tv), otherwise use thumbnail
                         if let Some(art) = &item.art {
                             if let Some(poster) = &art.poster {
@@ -162,12 +162,12 @@ impl NowPlayingState {
                                 }
                             }
                         }
-                        
+
                         // If still no thumbnail, try item.thumbnail
                         if self.thumbnail.is_none() {
                             self.thumbnail = item.thumbnail.clone();
                         }
-                        
+
                         // If thumbnail exists but is a local path (video@), try to get poster from art anyway
                         if self.thumbnail.is_none() || self.thumbnail.as_ref().map(|s| s.contains("video@")).unwrap_or(false) {
                             if let Some(art) = &item.art {
@@ -178,7 +178,7 @@ impl NowPlayingState {
                                 }
                             }
                         }
-                        
+
                         tracing::info!("Final thumbnail: {:?}", self.thumbnail);
                     }
                 } else {
@@ -216,7 +216,7 @@ pub struct SeekerContext {
 
 pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, NowPlayingWidgets, NowPlayingState, SeekerContext) {
     let state = NowPlayingState::new(client.clone());
-    
+
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 8);
     box_.set_margin_start(12);
     box_.set_margin_end(12);
@@ -230,23 +230,23 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     poster.set_halign(gtk::Align::Center);
     poster.set_hexpand(true);
     poster.set_vexpand(true);
-    
+
     let poster_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     poster_box.set_halign(gtk::Align::Center);
     poster_box.set_valign(gtk::Align::Center);
-    
+
     let poster_picture = gtk::Picture::new();
     poster_picture.set_hexpand(true);
     poster_picture.set_vexpand(true);
     poster_picture.set_size_request(300, -1);
     poster_picture.set_visible(false);
-    
+
     let poster_placeholder = gtk::Image::from_icon_name("media-video");
     poster_placeholder.set_icon_size(gtk::IconSize::Large);
     poster_placeholder.set_size_request(100, 100);
     poster_placeholder.set_hexpand(true);
     poster_placeholder.set_vexpand(true);
-    
+
     poster_box.append(&poster_picture);
     poster_box.append(&poster_placeholder);
     poster.set_child(Some(&poster_box));
@@ -279,13 +279,13 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     // Seeker - wrap in box for gesture handling
     let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     seeker_box.set_hexpand(true);
-    
+
     let seeker_adj = gtk::Adjustment::new(0.0, 0.0, 100.0, 0.1, 1.0, 0.0);
     let seeker = Scale::new(gtk::Orientation::Horizontal, Some(&seeker_adj));
     seeker.set_hexpand(true);
     seeker.set_draw_value(false);
     seeker_box.append(&seeker);
-    
+
     // Prepare seeker context for external connection (caller handles value-changed with poll trigger)
     let seeker_ctx = SeekerContext {
         adjustment: seeker_adj.clone(),
@@ -293,7 +293,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
         client: client.clone(),
         prev_val: Rc::new(RefCell::new(seeker_adj.value())),
     };
-    
+
     box_.append(&seeker_box);
 
     let time_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -352,7 +352,7 @@ pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayin
         let show_placeholder = match &state.thumbnail {
             Some(url) => {
                 tracing::debug!("=== FETCHING: {} ===", url);
-                
+
                 if let Some(ref c) = *client.borrow() {
                     let rt = match tokio::runtime::Runtime::new() {
                         Ok(rt) => rt,
@@ -398,7 +398,7 @@ pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayin
             }
             None => true,
         };
-        
+
         if show_placeholder {
             tracing::debug!("=== SHOW PLACEHOLDER ===");
             widgets.poster_picture.set_visible(false);
