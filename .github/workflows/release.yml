@@ -2,13 +2,15 @@ name: Build Linux ARM64
 
 on:
   push:
-    branches: [ "main" ]
+    # branches: [ "main" ]
     tags: [ 'v*' ]
 
 jobs:
   build-arm64:
     name: Build (Linux ARM64)
     runs-on: ubuntu-22.04-arm
+    permissions:
+      contents: write
 
     env:
       PROJECT_NAME: korers
