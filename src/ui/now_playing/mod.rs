@@ -1,3 +1,4 @@
-pub mod component;
-
-pub use component::{create_now_playing, start_local_advancement, trigger_kodi_poll, update_now_playing};
+mod layout;
+mod handlers;
+pub use layout::*;
+pub use handlers::*;

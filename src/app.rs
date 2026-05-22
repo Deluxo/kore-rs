@@ -3,9 +3,9 @@ use gtk::Application;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::host::Host;
-use crate::host::manager::HostManager;
-use crate::kodi::KodiClient;
+use crate::io::host::Host;
+use crate::io::host::manager::HostManager;
+use crate::io::kodi::KodiClient;
 use crate::ui::host_list::{create_host_manager_dialog, connect_host_dialog_handlers, HostListState};
 use crate::ui::now_playing::{create_now_playing, start_local_advancement, trigger_kodi_poll, update_now_playing};
 use crate::ui::remote::{create_remote, connect_remote_handlers};

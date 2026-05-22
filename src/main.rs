@@ -1,7 +1,6 @@
 mod app;
-mod effects;
-mod host;
-mod kodi;
+mod core;
+mod io;
 mod ui;
 
 use app::App;

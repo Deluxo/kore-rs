@@ -6,20 +6,10 @@ pub struct HostInfo {
     pub address: String,
     pub port: u16,
     pub mac_address: Option<String>,
-    pub wol_port: u16,
+    pub wol_port: Option<u16>,
 }
 
 impl HostInfo {
-    pub fn new(name: String, address: String, port: u16) -> Self {
-        Self {
-            name,
-            address,
-            port,
-            mac_address: None,
-            wol_port: 9,
-        }
-    }
-
     pub fn url(&self) -> String {
         format!("http://{}:{}", self.address, self.port)
     }
@@ -27,11 +17,11 @@ impl HostInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfo {
-    pub name: String,
-    pub version: String,
-    pub build_date: String,
-    pub hostname: String,
-    pub os: String,
+    pub name: Option<String>,
+    pub version: Option<serde_json::Value>,
+    pub build_date: Option<String>,
+    pub hostname: Option<String>,
+    pub os: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +34,7 @@ pub struct Art {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerItem {
-    pub id: i32,
+    pub id: Option<i32>,
     #[serde(rename = "type")]
     pub r#type: Option<String>,
     pub title: Option<String>,
@@ -60,9 +50,28 @@ pub struct PlayerItem {
     pub art: Option<Art>,
     pub year: Option<i32>,
     pub runtime: Option<i32>,
-    pub duration: Option<f64>,
+    pub duration: Option<i32>,
     pub plot: Option<String>,
     pub tagline: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetItemResponse {
+    pub item: PlayerItem,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerTime {
+    pub hours: i64,
+    pub minutes: i64,
+    pub seconds: i64,
+    pub milliseconds: i64,
+}
+
+impl PlayerTime {
+    pub fn to_seconds(&self) -> i64 {
+        self.hours * 3600 + self.minutes * 60 + self.seconds
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,38 +79,35 @@ pub struct PlayerProperty {
     pub speed: i32,
     pub time: PlayerTime,
     pub totaltime: PlayerTime,
-    pub playlistid: i32,
+    pub playlistid: Option<i32>,
+    #[serde(default)]
     pub currentaudiostream: Option<AudioStream>,
-    pub subtitleenabled: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlayerTime {
-    pub hours: i32,
-    pub minutes: i32,
-    pub seconds: i32,
-    pub milliseconds: i32,
-}
-
-impl PlayerTime {
-    pub fn to_seconds(&self) -> i64 {
-        (self.hours * 3600 + self.minutes * 60 + self.seconds) as i64
-    }
+    #[serde(default)]
+    pub subtitleenabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioStream {
     pub index: i32,
-    pub language: String,
-    pub name: String,
-    pub codec: String,
+    pub language: Option<String>,
+    pub name: Option<String>,
+    pub codec: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivePlayer {
+    pub playerid: i32,
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub playertype: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistItem {
-    pub playlistid: i32,
-    pub position: i32,
+    pub playlistid: Option<i32>,
+    pub position: Option<i32>,
     pub mediaid: Option<i32>,
+    #[serde(rename = "type")]
     pub r#type: Option<String>,
     pub title: Option<String>,
     pub file: Option<String>,
@@ -110,12 +116,13 @@ pub struct PlaylistItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileItem {
     pub file: String,
-    pub filetype: Option<String>,
+    pub filetype: String,
     pub title: Option<String>,
-    pub label: String,
+    pub label: Option<String>,
     pub thumbnail: Option<String>,
     pub fanart: Option<String>,
-    pub r#type: String,
+    #[serde(rename = "type")]
+    pub r#type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,15 +160,15 @@ pub struct MusicDetails {
 pub struct ApplicationProperty {
     pub volume: i32,
     pub muted: bool,
-    pub name: String,
-    pub version: ApplicationVersion,
+    pub name: Option<String>,
+    pub version: Option<ApplicationVersion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplicationVersion {
     pub major: i32,
     pub minor: i32,
-    pub revision: String,
+    pub revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,33 +182,25 @@ pub struct JsonRpcRequest {
 
 impl JsonRpcRequest {
     pub fn new(method: impl Into<String>) -> Self {
-        static mut REQUEST_ID: i32 = 1;
         Self {
             jsonrpc: "2.0".to_string(),
             method: method.into(),
             params: None,
-            id: unsafe {
-                REQUEST_ID += 1;
-                REQUEST_ID
-            },
+            id: next_id(),
         }
     }
 
-    pub fn with_params<P: Serialize>(mut self, params: P) -> Self {
-        self.params = Some(serde_json::to_value(params).ok()).flatten();
+    pub fn with_params(mut self, params: impl Serialize) -> Self {
+        self.params = Some(serde_json::to_value(params).unwrap());
         self
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcResponse<T> {
-    #[serde(rename = "jsonrpc")]
-    pub jsonrpc: String,
-    #[serde(rename = "id")]
-    pub id: i32,
-    #[serde(rename = "result")]
+    pub jsonrpc: Option<String>,
+    pub id: Option<i32>,
     pub result: Option<T>,
-    #[serde(rename = "error")]
     pub error: Option<JsonRpcError>,
 }
 
@@ -212,9 +211,50 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Favourite {
+    pub title: String,
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub path: Option<String>,
+    pub thumbnail: Option<String>,
+    pub window: Option<String>,
+    pub windowparameter: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InputAction {
+    Up,
+    Down,
+    Left,
+    Right,
+    Select,
+    Back,
+    Home,
+    Info,
+    ContextMenu,
+    PreviousMenu,
+}
+
+impl std::fmt::Display for InputAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputAction::Up => write!(f, "up"),
+            InputAction::Down => write!(f, "down"),
+            InputAction::Left => write!(f, "left"),
+            InputAction::Right => write!(f, "right"),
+            InputAction::Select => write!(f, "select"),
+            InputAction::Back => write!(f, "back"),
+            InputAction::Home => write!(f, "home"),
+            InputAction::Info => write!(f, "info"),
+            InputAction::ContextMenu => write!(f, "contextmenu"),
+            InputAction::PreviousMenu => write!(f, "previousmenu"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerId {
-    #[default]
     Active,
     Video,
     Audio,
@@ -223,9 +263,18 @@ pub enum PlayerId {
 impl std::fmt::Display for PlayerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PlayerId::Active => write!(f, "activeplayer"),
-            PlayerId::Video => write!(f, "playerid"),
-            PlayerId::Audio => write!(f, "playerid"),
+            PlayerId::Active => write!(f, "activeplayers"),
+            PlayerId::Video => write!(f, "video"),
+            PlayerId::Audio => write!(f, "audio"),
         }
+    }
+}
+
+static mut ID_COUNTER: i32 = 0;
+
+fn next_id() -> i32 {
+    unsafe {
+        ID_COUNTER += 1;
+        ID_COUNTER
     }
 }

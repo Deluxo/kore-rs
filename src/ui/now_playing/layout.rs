@@ -1,12 +1,10 @@
-use gtk::glib;
 use gtk::pango;
 use gtk::prelude::*;
 use gtk::Scale;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
 
-use crate::kodi::KodiClient;
+use crate::io::kodi::KodiClient;
 
 pub struct NowPlayingWidgets {
     pub title_label: gtk::Label,
@@ -27,12 +25,11 @@ pub struct NowPlayingState {
     pub plot: String,
     pub current_time: i64,
     pub duration: i64,
-    pub is_seeking: Rc<RefCell<bool>>,
     player_info: Rc<RefCell<Option<(i32, i64)>>>,
     pub thumbnail: Option<String>,
-    last_thumbnail: Option<String>,
+    pub last_thumbnail: Option<String>,
     pub cached_speed: f64,
-    last_poll_time: Instant,
+    last_poll_time: std::time::Instant,
     polled_time: i64,
     has_player: bool,
 }
@@ -46,12 +43,11 @@ impl NowPlayingState {
             plot: String::new(),
             current_time: 0,
             duration: 0,
-            is_seeking: Rc::new(RefCell::new(false)),
             player_info: Rc::new(RefCell::new(None)),
             thumbnail: None,
             last_thumbnail: None,
             cached_speed: 0.0,
-            last_poll_time: Instant::now(),
+            last_poll_time: std::time::Instant::now(),
             polled_time: 0,
             has_player: false,
         }
@@ -101,8 +97,6 @@ impl NowPlayingState {
                 tracing::info!("Found player with id: {}", p.playerid);
                 *self.player_info.borrow_mut() = Some((p.playerid, self.duration));
 
-                // Fetch player properties (time, duration, speed) — must always run
-                // regardless of whether get_current_item succeeds, so timing stays fresh.
                 if let Ok(props) = rt.block_on(c.get_player_properties(p.playerid)) {
                     tracing::info!("Player properties - time: {:?}, totaltime: {:?}, speed: {}", props.time, props.totaltime, props.speed);
                     self.current_time = props.time.to_seconds();
@@ -110,11 +104,8 @@ impl NowPlayingState {
                     self.cached_speed = props.speed as f64;
                     self.has_player = true;
                     self.polled_time = self.current_time;
-                    self.last_poll_time = Instant::now();
+                    self.last_poll_time = std::time::Instant::now();
 
-                    // Speed 0 can mean either paused or recently stopped.
-                    // Re-check active players to distinguish: if the player is gone,
-                    // transition to the no-player state immediately.
                     if props.speed == 0 {
                         if let Ok(recheck) = rt.block_on(c.get_active_players()) {
                             if recheck.is_empty() {
@@ -135,8 +126,6 @@ impl NowPlayingState {
                         }
                     }
                 } else {
-                    // Player ID exists but properties call failed (e.g. just stopped).
-                    // Stop local advancement until the next poll.
                     self.cached_speed = 0.0;
                     self.has_player = false;
                 }
@@ -145,62 +134,32 @@ impl NowPlayingState {
                 tracing::debug!("Poll - item: {:?}", item);
 
                 if let Ok(item) = item {
-                    let title = item.title.clone()
-                        .or(item.label.clone())
-                        .or(item.file.clone())
-                        .unwrap_or_else(|| "Playing".to_string());
+                    use crate::core::transform;
 
-                    let mut desc_parts = Vec::new();
-                    let media_type = item.r#type.as_deref().unwrap_or("unknown");
+                    let title = transform::format_media_title(
+                        item.title.as_deref(),
+                        item.label.as_deref(),
+                        item.file.as_deref(),
+                    );
 
-                    if media_type == "episode" {
-                        // TV show - show SxxExx and show title
-                        if let Some(show) = item.showtitle {
-                            if let (Some(season), Some(episode)) = (item.season, item.episode) {
-                                desc_parts.push(format!("S{:02}E{:02}", season, episode));
-                            }
-                            desc_parts.push(show);
-                        }
-                    } else if media_type == "song" || media_type == "unknown" {
-                        // Music - show artist + album
-                        if let Some(artist) = item.artist {
-                            desc_parts.push(artist.join(", "));
-                        }
-                        if let Some(album) = item.album {
-                            desc_parts.push(album);
-                        }
-                    }
-                    // For movies ("movie"), don't add anything to description - title is enough
+                    let desc = transform::format_media_description(
+                        item.r#type.as_deref().unwrap_or("unknown"),
+                        item.showtitle.as_deref(),
+                        item.season,
+                        item.episode,
+                        item.artist.as_deref(),
+                        item.album.as_deref(),
+                    );
 
-                    self.description = desc_parts.join(" • ");
+                    self.description = desc;
                     self.title = title;
                     self.plot = item.plot.clone().unwrap_or_else(|| item.tagline.clone().unwrap_or_default());
-
-                    tracing::debug!("item.thumbnail: {:?}", item.thumbnail);
-                    tracing::debug!("item.art: {:?}", item.art);
-                    tracing::debug!("item.plot: {:?}", item.plot);
-
-                    // Resolve thumbnail: prefer fanart.tv poster from art, fall back to item.thumbnail
-                    self.thumbnail = item.art.as_ref()
-                        .and_then(|art| art.poster.as_ref())
-                        .filter(|poster| poster.contains("fanart.tv") || poster.contains("assets.fanart.tv"))
-                        .cloned()
-                        .or(item.thumbnail.clone());
-
-                    // If thumbnail is a local path (video@), try to get poster from art anyway
-                    if self.thumbnail.as_ref().map_or(true, |s| s.contains("video@")) {
-                        self.thumbnail = self.thumbnail.take().or(
-                            item.art.as_ref()
-                                .and_then(|art| art.poster.as_ref())
-                                .filter(|poster| poster.contains("fanart.tv") || poster.contains("http"))
-                                .cloned()
-                        );
-                    }
-
-                    tracing::info!("Final thumbnail: {:?}", self.thumbnail);
+                    self.thumbnail = transform::resolve_thumbnail(
+                        item.art.as_ref().and_then(|art| art.poster.as_deref()),
+                        item.thumbnail.as_deref(),
+                    );
                 }
             } else {
-                // No active player - reset state
                 self.title = "No media playing".to_string();
                 self.description = String::new();
                 self.plot = String::new();
@@ -293,7 +252,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     plot_label.set_lines(4);
     box_.append(&plot_label);
 
-    // Seeker - wrap in box for gesture handling
+    // Seeker
     let seeker_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     seeker_box.set_hexpand(true);
 
@@ -303,7 +262,6 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     seeker.set_draw_value(false);
     seeker_box.append(&seeker);
 
-    // Prepare seeker context for external connection (caller handles value-changed with poll trigger)
     let seeker_ctx = SeekerContext {
         adjustment: seeker_adj.clone(),
         player_info: state.player_info.clone(),
@@ -346,133 +304,4 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     };
 
     (box_, widgets, state, seeker_ctx)
-}
-
-pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayingState, client: &Rc<RefCell<Option<KodiClient>>>) {
-    widgets.title_label.set_markup(&format!("<big><b>{}</b></big>", state.title));
-    widgets.description_label.set_text(&state.description);
-    widgets.plot_label.set_text(&state.plot);
-
-    widgets.seeker.set_value(state.percentage());
-
-    let remaining = state.duration - state.current_time;
-    let end_ts = chrono::Local::now() + chrono::Duration::seconds(remaining);
-
-    widgets.time_current.set_text(&format_time(state.current_time));
-    widgets.time_remaining.set_text(&format!("-{}", format_time(remaining)));
-    widgets.time_ends.set_text(&format!("ends {}", end_ts.format("%H:%M")));
-
-    let thumbnail_changed = state.thumbnail != state.last_thumbnail;
-    state.last_thumbnail = state.thumbnail.clone();
-
-    if thumbnail_changed {
-        let show_placeholder = match &state.thumbnail {
-            Some(url) => {
-                tracing::debug!("=== FETCHING: {} ===", url);
-
-                if let Some(ref c) = *client.borrow() {
-                    let rt = match tokio::runtime::Runtime::new() {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            tracing::warn!("Failed to create runtime: {}", e);
-                            return;
-                        }
-                    };
-                    let fetch_result = rt.block_on(async {
-                        tokio::time::timeout(std::time::Duration::from_secs(5), c.get_thumbnail(url)).await
-                    });
-                    match fetch_result {
-                        Ok(Ok(bytes)) => {
-                            tracing::debug!("=== SUCCESS: {} bytes ===", bytes.len());
-                            if bytes.len() > 1000 {
-                                match image::load_from_memory(&bytes) {
-                                    Ok(img) => {
-                                        tracing::debug!("=== DECODED: {}x{} ===", img.width(), img.height());
-                                        let temp_dir = std::env::temp_dir();
-                                        let temp_path = temp_dir.join("korers_thumb.png");
-                                        if img.save_with_format(&temp_path, image::ImageFormat::Png).is_ok() {
-                                            if let Some(path_str) = temp_path.to_str() {
-                                                tracing::debug!("=== SETTING PIC: {} ===", path_str);
-                                                widgets.poster_picture.set_filename(Some(path_str));
-                                                widgets.poster_picture.set_visible(true);
-                                                widgets.poster_placeholder.set_visible(false);
-                                                tracing::debug!("=== DONE - showing pic ===");
-                                                return;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => tracing::warn!("=== DECODE ERR: {} ===", e),
-                                }
-                            } else {
-                                tracing::warn!("=== TOO SMALL: {} ===", bytes.len());
-                            }
-                        }
-                        Ok(Err(e)) => tracing::warn!("=== FETCH ERR: {} ===", e),
-                        Err(e) => tracing::warn!("=== TIMEOUT: {} ===", e),
-                    }
-                }
-                true // Show placeholder on any failure
-            }
-            None => true,
-        };
-
-        if show_placeholder {
-            tracing::debug!("=== SHOW PLACEHOLDER ===");
-            widgets.poster_picture.set_visible(false);
-            widgets.poster_placeholder.set_visible(true);
-        }
-    }
-}
-
-/// Runs a lightweight timer that advances the seeker position locally
-/// using cached speed/duration — no Kodi API calls.
-/// Syncs `prev_val` before `update_now_playing` so the `value_changed`
-/// handler sees `curr == prev` and avoids re-entrancy / unintended seeks.
-pub fn start_local_advancement(
-    widgets: Rc<RefCell<NowPlayingWidgets>>,
-    state: Rc<RefCell<NowPlayingState>>,
-    client: Rc<RefCell<Option<KodiClient>>>,
-    prev_val: Rc<RefCell<f64>>,
-) {
-    glib::source::timeout_add_local(
-        std::time::Duration::from_millis(250),
-        move || {
-            let mut s = state.borrow_mut();
-            s.advance_locally();
-            *prev_val.borrow_mut() = s.percentage();
-            let mut w = widgets.borrow_mut();
-            update_now_playing(&mut *w, &mut *s, &client);
-            glib::ControlFlow::Continue
-        }
-    );
-}
-
-/// Triggers a single Kodi poll and refreshes the now-playing UI.
-/// Should be called after any remote button press or seeker interaction.
-/// Updates `prev_val` before `update_now_playing` so that `value_changed`
-/// on the seeker sees `curr == prev` and avoids re-entrancy / unintended seeks.
-pub fn trigger_kodi_poll(
-    widgets: &Rc<RefCell<NowPlayingWidgets>>,
-    state: &Rc<RefCell<NowPlayingState>>,
-    client: &Rc<RefCell<Option<KodiClient>>>,
-    prev_val: &Rc<RefCell<f64>>,
-) {
-    let mut s = state.borrow_mut();
-    s.poll();
-    // Sync prev_val to match what we're about to set, so the value_changed
-    // handler sees (curr - prev).abs() <= 0.5 and skips seeking / re-polling.
-    *prev_val.borrow_mut() = s.percentage();
-    let mut w = widgets.borrow_mut();
-    update_now_playing(&mut *w, &mut *s, client);
-}
-
-fn format_time(secs: i64) -> String {
-    let hours = secs / 3600;
-    let mins = (secs % 3600) / 60;
-    let s = secs % 60;
-    if hours > 0 {
-        format!("{}:{:02}:{:02}", hours, mins, s)
-    } else {
-        format!("{}:{:02}", mins, s)
-    }
 }
