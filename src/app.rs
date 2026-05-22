@@ -64,7 +64,7 @@ impl App {
             let window = create_main_window(app);
             let header = create_header_bar(&host_manager, &hosts);
             let client = auto_connect_first_host(&hosts);
-            let content = create_main_content(client.clone());
+            let content = create_main_content(client.clone(), &window);
 
             window.set_titlebar(Some(&header));
             window.set_child(Some(&content));
@@ -152,7 +152,7 @@ fn auto_connect_first_host(hosts: &[Host]) -> Rc<RefCell<Option<KodiClient>>> {
     client
 }
 
-fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
+fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>, window: &gtk::ApplicationWindow) -> gtk::Box {
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .hexpand(true)
@@ -246,6 +246,20 @@ fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
         let mut w = stop_w.borrow_mut();
         update_now_playing(&mut *w, &mut *s, &stop_c);
     });
+
+    // Poll Kodi once when window becomes active (e.g. user switches back to this window).
+    // Uses EventControllerFocus (not connect_notify on is-active) because Rc<RefCell<...>>
+    // does not implement Send+Sync required by property notification callbacks.
+    // Works on both desktop (GNOME/KDE) and mobile (Phosh/phoc).
+    let focus_ctrl = gtk::EventControllerFocus::new();
+    let fc_w = np_widgets.clone();
+    let fc_s = np_state.clone();
+    let fc_c = client.clone();
+    let fc_pv = btn_pv.clone();
+    focus_ctrl.connect_enter(move |_| {
+        trigger_kodi_poll(&fc_w, &fc_s, &fc_c, &fc_pv);
+    });
+    window.add_controller(focus_ctrl);
 
     content.append(&remote);
     content
