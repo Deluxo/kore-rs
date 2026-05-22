@@ -74,17 +74,17 @@ jobs:
           cp resources/kore-rs.desktop "${DEB_DIR}/usr/share/applications/"
           cp resources/icon.png "${DEB_DIR}/usr/share/icons/hicolor/256x256/apps/korers.png"
 
-          cat > "${DEB_DIR}/DEBIAN/control" << EOF
-Package: korers
-Version: ${VERSION}
-Section: utils
-Priority: optional
-Architecture: arm64
-Maintainer: Korers Developers
-Description: A Rust desktop remote control for Kodi
- A GTK4-based remote control application for Kodi media center,
- built with Rust and Relm4.
-EOF
+          {
+            echo "Package: korers"
+            echo "Version: ${VERSION}"
+            echo "Section: utils"
+            echo "Priority: optional"
+            echo "Architecture: arm64"
+            echo "Maintainer: Korers Developers"
+            echo "Description: A Rust desktop remote control for Kodi"
+            echo " A GTK4-based remote control application for Kodi media center,"
+            echo " built with Rust and Relm4."
+          } > "${DEB_DIR}/DEBIAN/control"
 
           dpkg-deb --build "${DEB_DIR}" "dist/korers_${VERSION}_arm64.deb"
 
