@@ -189,56 +189,123 @@ pub fn connect_remote_handlers(widgets: &RemoteWidgets, state: &RemoteState) {
 }
 
 fn transport_action(client: &Rc<RefCell<Option<KodiClient>>>, action: &str) {
-    if let Some(ref c) = *client.borrow() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        if let Ok(players) = rt.block_on(c.get_active_players()) {
-            if let Some(p) = players.first() {
-                match action {
-                    "play_pause" => {
-                        tracing::debug!("play_pause: player_id={}", p.playerid);
-                        match rt.block_on(c.play_pause(p.playerid)) {
-                            Ok(speed) => tracing::debug!("  speed={}", speed),
-                            Err(e) => tracing::warn!("  play_pause error: {:?}", e),
-                        }
-                    }
-                    "stop" => {
-                        let _ = rt.block_on(c.stop(p.playerid));
-                    }
-                    "previous" => {
-                        let _ = rt.block_on(c.go_to(p.playerid, "previous"));
-                    }
-                    "next" => {
-                        let _ = rt.block_on(c.go_to(p.playerid, "next"));
-                    }
-                    _ => {}
-                }
-            }
+    let binding = client.borrow();
+    let c = if let Some(ref c) = *binding {
+        c
+    } else {
+        tracing::debug!("No Kodi client for transport action");
+        return;
+    };
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            tracing::warn!("Failed to create runtime: {}", e);
+            return;
         }
+    };
+    let players = rt.block_on(c.get_active_players());
+    if let Ok(players) = players {
+        if let Some(p) = players.first() {
+            match action {
+                "play_pause" => {
+                    tracing::debug!("play_pause: player_id={}", p.playerid);
+                    match rt.block_on(c.play_pause(p.playerid)) {
+                        Ok(speed) => tracing::debug!("  speed={}", speed),
+                        Err(e) => tracing::warn!("  play_pause error: {:?}", e),
+                    }
+                }
+                "stop" => {
+                    let target_id = p.playerid;
+                    let _ = rt.block_on(c.stop(target_id));
+                    // Busy-wait until Kodi confirms the player is really gone.
+                    // Without this, a subsequent poll might see the player as
+                    // still active with speed > 0, keeping the seeker advancing.
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_millis(1000);
+                    while std::time::Instant::now() < deadline {
+                        if let Ok(players) = rt.block_on(c.get_active_players()) {
+                            if !players.iter().any(|ap| ap.playerid == target_id) {
+                                break;
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
+                "previous" => {
+                    let _ = rt.block_on(c.go_to(p.playerid, "previous"));
+                }
+                "next" => {
+                    let _ = rt.block_on(c.go_to(p.playerid, "next"));
+                }
+                _ => {}
+            }
+        } else {
+            tracing::debug!("No active players for transport action");
+        }
+    } else {
+        tracing::warn!("Failed to get active players");
     }
 }
 
 fn send_input(client: &Rc<RefCell<Option<KodiClient>>>, action: InputAction) {
-    if let Some(ref c) = *client.borrow() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _ = rt.block_on(c.input(action));
-    }
+    let binding = client.borrow();
+    let c = if let Some(ref c) = *binding {
+        c
+    } else {
+        tracing::debug!("No Kodi client for input action");
+        return;
+    };
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            tracing::warn!("Failed to create runtime: {}", e);
+            return;
+        }
+    };
+    let _ = rt.block_on(c.input(action));
 }
 
 fn volume_change(client: &Rc<RefCell<Option<KodiClient>>>, delta: i32) {
-    if let Some(ref c) = *client.borrow() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        if let Ok(p) = rt.block_on(c.get_application_properties()) {
-            let new_vol = (p.volume + delta).clamp(0, 100);
-            let _ = rt.block_on(c.set_volume(new_vol));
+    let binding = client.borrow();
+    let c = if let Some(ref c) = *binding {
+        c
+    } else {
+        tracing::debug!("No Kodi client for volume change");
+        return;
+    };
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            tracing::warn!("Failed to create runtime: {}", e);
+            return;
         }
+    };
+    if let Ok(p) = rt.block_on(c.get_application_properties()) {
+        let new_vol = (p.volume + delta).clamp(0, 100);
+        let _ = rt.block_on(c.set_volume(new_vol));
+    } else {
+        tracing::warn!("Failed to get application properties for volume change");
     }
 }
 
 fn volume_mute(client: &Rc<RefCell<Option<KodiClient>>>) {
-    if let Some(ref c) = *client.borrow() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        if let Ok(p) = rt.block_on(c.get_application_properties()) {
-            let _ = rt.block_on(c.set_mute(!p.muted));
+    let binding = client.borrow();
+    let c = if let Some(ref c) = *binding {
+        c
+    } else {
+        tracing::debug!("No Kodi client for volume mute");
+        return;
+    };
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            tracing::warn!("Failed to create runtime: {}", e);
+            return;
         }
+    };
+    if let Ok(p) = rt.block_on(c.get_application_properties()) {
+        let _ = rt.block_on(c.set_mute(!p.muted));
+    } else {
+        tracing::warn!("Failed to get application properties for mute toggle");
     }
 }

@@ -7,7 +7,7 @@ use crate::host::Host;
 use crate::host::manager::HostManager;
 use crate::kodi::KodiClient;
 use crate::ui::host_list::{create_host_manager_dialog, connect_host_dialog_handlers, HostListState};
-use crate::ui::now_playing::{create_now_playing, start_local_advancement, trigger_kodi_poll};
+use crate::ui::now_playing::{create_now_playing, start_local_advancement, trigger_kodi_poll, update_now_playing};
 use crate::ui::remote::{create_remote, connect_remote_handlers};
 
 pub struct App {
@@ -44,6 +44,8 @@ impl App {
         if let Ok(mgr) = HostManager::new() {
             self.hosts = mgr.hosts().to_vec();
             *self.host_manager.borrow_mut() = Some(mgr);
+        } else {
+            tracing::warn!("Failed to load hosts manager");
         }
         self
     }
@@ -55,6 +57,8 @@ impl App {
         self.app.connect_activate(move |app| {
             if let Some(settings) = gtk::Settings::default() {
                 settings.set_property("gtk-application-prefer-dark-theme", true);
+            } else {
+                tracing::debug!("No GTK settings available");
             }
             
             let window = create_main_window(app);
@@ -128,11 +132,21 @@ fn auto_connect_first_host(hosts: &[Host]) -> Rc<RefCell<Option<KodiClient>>> {
 
     if let Some(first_host) = hosts.first() {
         let kodi_client = KodiClient::from_host(first_host);
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::warn!("Failed to create runtime for auto-connect: {}", e);
+                return client;
+            }
+        };
         if rt.block_on(kodi_client.ping()).is_ok() {
             client.replace(Some(kodi_client));
             tracing::info!("Auto-connected to {}", first_host.name);
+        } else {
+            tracing::warn!("Failed to ping {} for auto-connect", first_host.name);
         }
+    } else {
+        tracing::debug!("No hosts available for auto-connect");
     }
 
     client
@@ -189,11 +203,10 @@ fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
     let (remote, r_widgets, r_state) = create_remote(client.clone());
     connect_remote_handlers(&r_widgets, &r_state);
 
-    // Attach Kodi poll trigger to all remote buttons
-    let buttons: [&gtk::Button; 16] = [
+    // Attach Kodi poll trigger to all remote buttons (except stop — handled separately)
+    let buttons: [&gtk::Button; 15] = [
         &r_widgets.btn_prev,
         &r_widgets.btn_play,
-        &r_widgets.btn_stop,
         &r_widgets.btn_next,
         &r_widgets.btn_back,
         &r_widgets.btn_home,
@@ -218,6 +231,21 @@ fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
             trigger_kodi_poll(&w, &s, &c, &pv);
         });
     }
+
+    // Stop button: force-reset now-playing state regardless of Kodi's response.
+    // Kodi may keep the player in GetActivePlayers with speed=0 after stop,
+    // which would leave the seeker at the last position instead of 0.
+    let stop_s = np_state.clone();
+    let stop_w = np_widgets.clone();
+    let stop_c = client.clone();
+    let stop_pv = btn_pv.clone();
+    r_widgets.btn_stop.connect_clicked(move |_| {
+        let mut s = stop_s.borrow_mut();
+        s.reset();
+        *stop_pv.borrow_mut() = s.percentage();
+        let mut w = stop_w.borrow_mut();
+        update_now_playing(&mut *w, &mut *s, &stop_c);
+    });
 
     content.append(&remote);
     content

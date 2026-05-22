@@ -104,15 +104,15 @@ impl KodiClient {
                         tracing::info!("Remote got {} bytes", bytes.len());
                         return Ok(bytes.to_vec());
                     }
-                    if response.status().as_u16() == 301 || response.status().as_u16() == 302 {
-                        if let Some(location) = response.headers().get("location") {
-                            let redirect_url = location.to_str().unwrap_or(&url_to_fetch).to_string();
-                            tracing::info!("Following redirect to: {}", redirect_url);
-                            let response = client.get(&redirect_url).send().await?;
-                            if response.status().is_success() {
-                                let bytes = response.bytes().await.map_err(ClientError::Network)?;
-                                return Ok(bytes.to_vec());
-                            }
+                    if let Some(location) = response.headers().get("location")
+                        .filter(|_| response.status().as_u16() == 301 || response.status().as_u16() == 302)
+                    {
+                        let redirect_url = location.to_str().unwrap_or(&url_to_fetch).to_string();
+                        tracing::info!("Following redirect to: {}", redirect_url);
+                        let response = client.get(&redirect_url).send().await?;
+                        if response.status().is_success() {
+                            let bytes = response.bytes().await.map_err(ClientError::Network)?;
+                            return Ok(bytes.to_vec());
                         }
                     }
                 }

@@ -100,19 +100,15 @@ impl DiscoveryService {
             }
         }
 
-        if let Some((address, port)) = location {
-            let name = name.unwrap_or_else(|| format!("Kodi @ {}", address));
-            return Some(HostInfo::new(name, address, port));
-        }
-
-        let ip_pattern = regex_lite::Regex::new(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})").ok()?;
-        if let Some(caps) = ip_pattern.captures(response) {
-            let address = caps.get(1)?.as_str().to_string();
-            let name = name.unwrap_or_else(|| format!("Kodi @ {}", address));
-            return Some(HostInfo::new(name, address, 8080));
-        }
-
-        None
+        let (address, port) = location
+            .or_else(|| {
+                let ip_pattern = regex_lite::Regex::new(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})").ok()?;
+                let caps = ip_pattern.captures(response)?;
+                let addr = caps.get(1)?.as_str().to_string();
+                Some((addr, 8080u16))
+            })?;
+        let name = name.unwrap_or_else(|| format!("Kodi @ {}", address));
+        Some(HostInfo::new(name, address, port))
     }
 
     fn parse_location(line: &str) -> Option<(String, u16)> {

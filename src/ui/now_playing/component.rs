@@ -57,6 +57,19 @@ impl NowPlayingState {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.title = "No media playing".to_string();
+        self.description = String::new();
+        self.plot = String::new();
+        self.thumbnail = None;
+        self.last_thumbnail = None;
+        self.current_time = 0;
+        self.duration = 0;
+        self.cached_speed = 0.0;
+        self.has_player = false;
+        *self.player_info.borrow_mut() = None;
+    }
+
     pub fn percentage(&self) -> f64 {
         if self.duration > 0 {
             (self.current_time as f64 / self.duration as f64) * 100.0
@@ -67,132 +80,136 @@ impl NowPlayingState {
 
     pub fn poll(&mut self) {
         let client = self.client.borrow();
-        if let Some(ref c) = *client {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let players = rt.block_on(c.get_active_players());
-            tracing::debug!("Poll - players: {:?}", players);
+        let c = if let Some(ref c) = *client {
+            c
+        } else {
+            tracing::debug!("No Kodi client available for poll");
+            return;
+        };
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::warn!("Failed to create runtime in poll: {}", e);
+                return;
+            }
+        };
+        let players = rt.block_on(c.get_active_players());
+        tracing::debug!("Poll - players: {:?}", players);
 
-            if let Ok(players) = players {
-                if let Some(p) = players.first() {
-                    tracing::info!("Found player with id: {}", p.playerid);
-                    *self.player_info.borrow_mut() = Some((p.playerid, self.duration));
+        if let Ok(players) = players {
+            if let Some(p) = players.first() {
+                tracing::info!("Found player with id: {}", p.playerid);
+                *self.player_info.borrow_mut() = Some((p.playerid, self.duration));
 
-                    // Fetch player properties (time, duration, speed) — must always run
-                    // regardless of whether get_current_item succeeds, so timing stays fresh.
-                    if let Ok(props) = rt.block_on(c.get_player_properties(p.playerid)) {
-                        tracing::info!("Player properties - time: {:?}, totaltime: {:?}, speed: {}", props.time, props.totaltime, props.speed);
-                        self.current_time = props.time.to_seconds();
-                        self.duration = props.totaltime.to_seconds();
-                        self.cached_speed = props.speed as f64;
-                        self.has_player = true;
-                        self.polled_time = self.current_time;
-                        self.last_poll_time = Instant::now();
+                // Fetch player properties (time, duration, speed) — must always run
+                // regardless of whether get_current_item succeeds, so timing stays fresh.
+                if let Ok(props) = rt.block_on(c.get_player_properties(p.playerid)) {
+                    tracing::info!("Player properties - time: {:?}, totaltime: {:?}, speed: {}", props.time, props.totaltime, props.speed);
+                    self.current_time = props.time.to_seconds();
+                    self.duration = props.totaltime.to_seconds();
+                    self.cached_speed = props.speed as f64;
+                    self.has_player = true;
+                    self.polled_time = self.current_time;
+                    self.last_poll_time = Instant::now();
 
-                        // Speed 0 can mean either paused or recently stopped.
-                        // Re-check active players to distinguish: if the player is gone,
-                        // transition to the no-player state immediately.
-                        if props.speed == 0 {
-                            if let Ok(recheck) = rt.block_on(c.get_active_players()) {
-                                if recheck.is_empty() {
-                                    tracing::info!("Player stopped (re-check after speed=0)");
-                                    self.title = "No media playing".to_string();
-                                    self.description = String::new();
-                                    self.plot = String::new();
-                                    self.thumbnail = None;
-                                    self.current_time = 0;
-                                    self.duration = 0;
-                                    self.cached_speed = 0.0;
-                                    self.has_player = false;
-                                    *self.player_info.borrow_mut() = None;
-                                    return;
-                                }
+                    // Speed 0 can mean either paused or recently stopped.
+                    // Re-check active players to distinguish: if the player is gone,
+                    // transition to the no-player state immediately.
+                    if props.speed == 0 {
+                        if let Ok(recheck) = rt.block_on(c.get_active_players()) {
+                            if recheck.is_empty() {
+                                tracing::info!("Player stopped (re-check after speed=0)");
+                                self.title = "No media playing".to_string();
+                                self.description = String::new();
+                                self.plot = String::new();
+                                self.thumbnail = None;
+                                self.current_time = 0;
+                                self.duration = 0;
+                                self.cached_speed = 0.0;
+                                self.has_player = false;
+                                *self.player_info.borrow_mut() = None;
+                                return;
                             }
+                        } else {
+                            tracing::warn!("Failed to re-check active players after speed=0");
                         }
-                    } else {
-                        // Player ID exists but properties call failed (e.g. just stopped).
-                        // Stop local advancement until the next poll.
-                        self.cached_speed = 0.0;
-                        self.has_player = false;
-                    }
-
-                    let item = rt.block_on(c.get_current_item(p.playerid));
-                    tracing::debug!("Poll - item: {:?}", item);
-
-                    if let Ok(item) = item {
-                        let title = item.title.clone()
-                            .or(item.label.clone())
-                            .or(item.file.clone())
-                            .unwrap_or_else(|| "Playing".to_string());
-
-                        let mut desc_parts = Vec::new();
-                        let media_type = item.r#type.as_deref().unwrap_or("unknown");
-
-                        if media_type == "episode" {
-                            // TV show - show SxxExx and show title
-                            if let Some(show) = item.showtitle {
-                                if let (Some(season), Some(episode)) = (item.season, item.episode) {
-                                    desc_parts.push(format!("S{:02}E{:02}", season, episode));
-                                }
-                                desc_parts.push(show);
-                            }
-                        } else if media_type == "song" || media_type == "unknown" {
-                            // Music - show artist + album
-                            if let Some(artist) = item.artist {
-                                desc_parts.push(artist.join(", "));
-                            }
-                            if let Some(album) = item.album {
-                                desc_parts.push(album);
-                            }
-                        }
-                        // For movies ("movie"), don't add anything to description - title is enough
-
-                        self.description = desc_parts.join(" • ");
-                        self.title = title;
-                        self.plot = item.plot.clone().unwrap_or_else(|| item.tagline.clone().unwrap_or_default());
-
-                        tracing::debug!("item.thumbnail: {:?}", item.thumbnail);
-                        tracing::debug!("item.art: {:?}", item.art);
-                        tracing::debug!("item.plot: {:?}", item.plot);
-
-                        // If art exists, use poster from it (fanart.tv), otherwise use thumbnail
-                        if let Some(art) = &item.art {
-                            if let Some(poster) = &art.poster {
-                                if poster.contains("fanart.tv") || poster.contains("assets.fanart.tv") {
-                                    self.thumbnail = Some(poster.clone());
-                                }
-                            }
-                        }
-
-                        // If still no thumbnail, try item.thumbnail
-                        if self.thumbnail.is_none() {
-                            self.thumbnail = item.thumbnail.clone();
-                        }
-
-                        // If thumbnail exists but is a local path (video@), try to get poster from art anyway
-                        if self.thumbnail.is_none() || self.thumbnail.as_ref().map(|s| s.contains("video@")).unwrap_or(false) {
-                            if let Some(art) = &item.art {
-                                if let Some(poster) = &art.poster {
-                                    if poster.contains("fanart.tv") || poster.contains("http") {
-                                        self.thumbnail = Some(poster.clone());
-                                    }
-                                }
-                            }
-                        }
-
-                        tracing::info!("Final thumbnail: {:?}", self.thumbnail);
                     }
                 } else {
-                    // No active player - reset state
-                    self.title = "No media playing".to_string();
-                    self.description = String::new();
-                    self.plot = String::new();
-                    self.thumbnail = None;
-                    self.current_time = 0;
-                    self.duration = 0;
+                    // Player ID exists but properties call failed (e.g. just stopped).
+                    // Stop local advancement until the next poll.
                     self.cached_speed = 0.0;
                     self.has_player = false;
-                    *self.player_info.borrow_mut() = None;
                 }
+
+                let item = rt.block_on(c.get_current_item(p.playerid));
+                tracing::debug!("Poll - item: {:?}", item);
+
+                if let Ok(item) = item {
+                    let title = item.title.clone()
+                        .or(item.label.clone())
+                        .or(item.file.clone())
+                        .unwrap_or_else(|| "Playing".to_string());
+
+                    let mut desc_parts = Vec::new();
+                    let media_type = item.r#type.as_deref().unwrap_or("unknown");
+
+                    if media_type == "episode" {
+                        // TV show - show SxxExx and show title
+                        if let Some(show) = item.showtitle {
+                            if let (Some(season), Some(episode)) = (item.season, item.episode) {
+                                desc_parts.push(format!("S{:02}E{:02}", season, episode));
+                            }
+                            desc_parts.push(show);
+                        }
+                    } else if media_type == "song" || media_type == "unknown" {
+                        // Music - show artist + album
+                        if let Some(artist) = item.artist {
+                            desc_parts.push(artist.join(", "));
+                        }
+                        if let Some(album) = item.album {
+                            desc_parts.push(album);
+                        }
+                    }
+                    // For movies ("movie"), don't add anything to description - title is enough
+
+                    self.description = desc_parts.join(" • ");
+                    self.title = title;
+                    self.plot = item.plot.clone().unwrap_or_else(|| item.tagline.clone().unwrap_or_default());
+
+                    tracing::debug!("item.thumbnail: {:?}", item.thumbnail);
+                    tracing::debug!("item.art: {:?}", item.art);
+                    tracing::debug!("item.plot: {:?}", item.plot);
+
+                    // Resolve thumbnail: prefer fanart.tv poster from art, fall back to item.thumbnail
+                    self.thumbnail = item.art.as_ref()
+                        .and_then(|art| art.poster.as_ref())
+                        .filter(|poster| poster.contains("fanart.tv") || poster.contains("assets.fanart.tv"))
+                        .cloned()
+                        .or(item.thumbnail.clone());
+
+                    // If thumbnail is a local path (video@), try to get poster from art anyway
+                    if self.thumbnail.as_ref().map_or(true, |s| s.contains("video@")) {
+                        self.thumbnail = self.thumbnail.take().or(
+                            item.art.as_ref()
+                                .and_then(|art| art.poster.as_ref())
+                                .filter(|poster| poster.contains("fanart.tv") || poster.contains("http"))
+                                .cloned()
+                        );
+                    }
+
+                    tracing::info!("Final thumbnail: {:?}", self.thumbnail);
+                }
+            } else {
+                // No active player - reset state
+                self.title = "No media playing".to_string();
+                self.description = String::new();
+                self.plot = String::new();
+                self.thumbnail = None;
+                self.current_time = 0;
+                self.duration = 0;
+                self.cached_speed = 0.0;
+                self.has_player = false;
+                *self.player_info.borrow_mut() = None;
             }
         }
     }

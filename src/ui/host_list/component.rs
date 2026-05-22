@@ -108,6 +108,8 @@ pub fn connect_host_dialog_handlers(dialog: &gtk::Dialog, widgets: &HostListWidg
                     let mut m = mgr.borrow_mut();
                     if let Some(ref mut manager) = *m {
                         let _ = manager.add_host(host);
+                    } else {
+                        tracing::warn!("Host manager not available during discovery");
                     }
                 }
             }
@@ -119,21 +121,27 @@ pub fn connect_host_dialog_handlers(dialog: &gtk::Dialog, widgets: &HostListWidg
     let client = state.client.clone();
     let mgr = state.host_manager.clone();
     widgets.btn_connect.connect_clicked(move |_| {
-        if let Some(row) = list.selected_row() {
-            let idx = row.index() as usize;
-            let m = mgr.borrow();
-            if let Some(manager) = m.as_ref() {
-                if let Some(host) = manager.hosts().get(idx) {
-                    let kodi_client = KodiClient::from_host(host);
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    if rt.block_on(kodi_client.ping()).is_ok() {
-                        client.replace(Some(kodi_client));
-                        tracing::info!("Connected to {}", host.name);
-                    } else {
-                        tracing::warn!("Failed to ping {}", host.name);
-                    }
+        let m = mgr.borrow();
+        let host = list.selected_row()
+            .and_then(|row| m.as_ref()
+                .and_then(|manager| manager.hosts().get(row.index() as usize)));
+        if let Some(host) = host {
+            let kodi_client = KodiClient::from_host(host);
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::warn!("Failed to create runtime: {}", e);
+                    return;
                 }
+            };
+            if rt.block_on(kodi_client.ping()).is_ok() {
+                client.replace(Some(kodi_client));
+                tracing::info!("Connected to {}", host.name);
+            } else {
+                tracing::warn!("Failed to ping {}", host.name);
             }
+        } else {
+            tracing::warn!("No host selected or host not found");
         }
     });
 
@@ -146,14 +154,14 @@ pub fn connect_host_dialog_handlers(dialog: &gtk::Dialog, widgets: &HostListWidg
     let list = widgets.list.clone();
     let mgr = state.host_manager.clone();
     widgets.btn_edit.connect_clicked(move |_| {
-        if let Some(row) = list.selected_row() {
-            let idx = row.index() as usize;
-            let m = mgr.borrow();
-            if let Some(manager) = m.as_ref() {
-                if let Some(host) = manager.hosts().get(idx) {
-                    show_edit_host_dialog(host, mgr.clone());
-                }
-            }
+        let m = mgr.borrow();
+        let host = list.selected_row()
+            .and_then(|row| m.as_ref()
+                .and_then(|manager| manager.hosts().get(row.index() as usize)));
+        if let Some(host) = host {
+            show_edit_host_dialog(host, mgr.clone());
+        } else {
+            tracing::warn!("No host selected or host not found");
         }
     });
 
@@ -161,20 +169,29 @@ pub fn connect_host_dialog_handlers(dialog: &gtk::Dialog, widgets: &HostListWidg
     let mgr = state.host_manager.clone();
     widgets.btn_del.connect_clicked(move |_| {
         if let Some(row) = list.selected_row() {
-            let idx = row.index() as usize;
-            let m = mgr.borrow();
-            if let Some(manager) = m.as_ref() {
-                if let Some(hosts) = manager.hosts().get(idx) {
-                    let host_id = hosts.id.clone();
-                    drop(m);
-                    if let Ok(mut mm) = mgr.try_borrow_mut() {
-                        if let Some(ref mut manager) = *mm {
-                            let _ = manager.remove_host(&host_id);
-                        }
+            let host_id = {
+                let m = mgr.borrow();
+                list.selected_row()
+                    .and_then(|r| m.as_ref()
+                        .and_then(|manager| manager.hosts().get(r.index() as usize)))
+                    .map(|h| h.id.clone())
+            };
+            if let Some(id) = host_id {
+                if let Ok(mut mm) = mgr.try_borrow_mut() {
+                    if let Some(ref mut manager) = *mm {
+                        let _ = manager.remove_host(&id);
+                    } else {
+                        tracing::warn!("Host manager not available during delete");
                     }
+                } else {
+                    tracing::warn!("Could not borrow host manager mutably during delete");
                 }
+            } else {
+                tracing::warn!("Host not found during delete");
             }
             list.remove(&row);
+        } else {
+            tracing::debug!("No row selected for delete");
         }
     });
 
@@ -249,6 +266,8 @@ pub fn show_add_host_dialog(
                 let mut m = mgr.borrow_mut();
                 if let Some(ref mut manager) = *m {
                     let _ = manager.add_host(host);
+                } else {
+                    tracing::warn!("Host manager not available when adding host");
                 }
             }
         }
@@ -307,6 +326,8 @@ pub fn show_edit_host_dialog(host: &Host, host_manager: Rc<RefCell<Option<HostMa
                 let mut m = mgr.borrow_mut();
                 if let Some(ref mut manager) = *m {
                     let _ = manager.update_host(new_host);
+                } else {
+                    tracing::warn!("Host manager not available when updating host");
                 }
             }
         }
