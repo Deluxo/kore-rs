@@ -4,6 +4,7 @@ use gtk::prelude::*;
 use gtk::Scale;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 use crate::kodi::KodiClient;
 
@@ -30,6 +31,10 @@ pub struct NowPlayingState {
     player_info: Rc<RefCell<Option<(i32, i64)>>>,
     pub thumbnail: Option<String>,
     last_thumbnail: Option<String>,
+    pub cached_speed: f64,
+    last_poll_time: Instant,
+    polled_time: i64,
+    has_player: bool,
 }
 
 impl NowPlayingState {
@@ -45,6 +50,10 @@ impl NowPlayingState {
             player_info: Rc::new(RefCell::new(None)),
             thumbnail: None,
             last_thumbnail: None,
+            cached_speed: 0.0,
+            last_poll_time: Instant::now(),
+            polled_time: 0,
+            has_player: false,
         }
     }
 
@@ -67,6 +76,44 @@ impl NowPlayingState {
                 if let Some(p) = players.first() {
                     tracing::info!("Found player with id: {}", p.playerid);
                     *self.player_info.borrow_mut() = Some((p.playerid, self.duration));
+
+                    // Fetch player properties (time, duration, speed) — must always run
+                    // regardless of whether get_current_item succeeds, so timing stays fresh.
+                    if let Ok(props) = rt.block_on(c.get_player_properties(p.playerid)) {
+                        tracing::info!("Player properties - time: {:?}, totaltime: {:?}, speed: {}", props.time, props.totaltime, props.speed);
+                        self.current_time = props.time.to_seconds();
+                        self.duration = props.totaltime.to_seconds();
+                        self.cached_speed = props.speed as f64;
+                        self.has_player = true;
+                        self.polled_time = self.current_time;
+                        self.last_poll_time = Instant::now();
+
+                        // Speed 0 can mean either paused or recently stopped.
+                        // Re-check active players to distinguish: if the player is gone,
+                        // transition to the no-player state immediately.
+                        if props.speed == 0 {
+                            if let Ok(recheck) = rt.block_on(c.get_active_players()) {
+                                if recheck.is_empty() {
+                                    tracing::info!("Player stopped (re-check after speed=0)");
+                                    self.title = "No media playing".to_string();
+                                    self.description = String::new();
+                                    self.plot = String::new();
+                                    self.thumbnail = None;
+                                    self.current_time = 0;
+                                    self.duration = 0;
+                                    self.cached_speed = 0.0;
+                                    self.has_player = false;
+                                    *self.player_info.borrow_mut() = None;
+                                    return;
+                                }
+                            }
+                        }
+                    } else {
+                        // Player ID exists but properties call failed (e.g. just stopped).
+                        // Stop local advancement until the next poll.
+                        self.cached_speed = 0.0;
+                        self.has_player = false;
+                    }
 
                     let item = rt.block_on(c.get_current_item(p.playerid));
                     tracing::debug!("Poll - item: {:?}", item);
@@ -133,11 +180,6 @@ impl NowPlayingState {
                         }
                         
                         tracing::info!("Final thumbnail: {:?}", self.thumbnail);
-
-                        if let Ok(props) = rt.block_on(c.get_player_properties(p.playerid)) {
-                            self.current_time = props.time.to_seconds();
-                            self.duration = props.totaltime.to_seconds();
-                        }
                     }
                 } else {
                     // No active player - reset state
@@ -147,14 +189,32 @@ impl NowPlayingState {
                     self.thumbnail = None;
                     self.current_time = 0;
                     self.duration = 0;
+                    self.cached_speed = 0.0;
+                    self.has_player = false;
                     *self.player_info.borrow_mut() = None;
                 }
             }
         }
     }
+
+    pub fn advance_locally(&mut self) {
+        if !self.has_player || self.cached_speed == 0.0 {
+            return;
+        }
+        let elapsed = self.last_poll_time.elapsed().as_secs_f64();
+        let new_time = self.polled_time as f64 + elapsed * self.cached_speed;
+        self.current_time = (new_time as i64).clamp(0, self.duration);
+    }
 }
 
-pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, NowPlayingWidgets, NowPlayingState) {
+pub struct SeekerContext {
+    pub adjustment: gtk::Adjustment,
+    pub player_info: Rc<RefCell<Option<(i32, i64)>>>,
+    pub client: Rc<RefCell<Option<KodiClient>>>,
+    pub prev_val: Rc<RefCell<f64>>,
+}
+
+pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, NowPlayingWidgets, NowPlayingState, SeekerContext) {
     let state = NowPlayingState::new(client.clone());
     
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -226,34 +286,13 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
     seeker.set_draw_value(false);
     seeker_box.append(&seeker);
     
-    // Track user interaction state
-    let player_info = state.player_info.clone();
-    let client_for_adj = client.clone();
-    let previous_value = Rc::new(RefCell::new(0.0f64));
-    
-    // Store initial value
-    *previous_value.borrow_mut() = seeker_adj.value();
-    
-    // Use scale's value-changed to detect user interaction
-    let player_info_adj = player_info.clone();
-    let client_adj = client_for_adj.clone();
-    let prev_val = previous_value.clone();
-    seeker_adj.connect_value_changed(move |adj| {
-        let curr = adj.value();
-        let prev = *prev_val.borrow();
-        
-        // Only seek if value actually changed (user dragged)
-        if (curr - prev).abs() > 0.5 {
-            *prev_val.borrow_mut() = curr;
-            
-            if let Some((player_id, _)) = *player_info_adj.borrow() {
-                if let Some(ref c) = *client_adj.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
-                }
-            }
-        }
-    });
+    // Prepare seeker context for external connection (caller handles value-changed with poll trigger)
+    let seeker_ctx = SeekerContext {
+        adjustment: seeker_adj.clone(),
+        player_info: state.player_info.clone(),
+        client: client.clone(),
+        prev_val: Rc::new(RefCell::new(seeker_adj.value())),
+    };
     
     box_.append(&seeker_box);
 
@@ -289,7 +328,7 @@ pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box,
         poster_placeholder,
     };
 
-    (box_, widgets, state)
+    (box_, widgets, state, seeker_ctx)
 }
 
 pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayingState, client: &Rc<RefCell<Option<KodiClient>>>) {
@@ -368,19 +407,46 @@ pub fn update_now_playing(widgets: &mut NowPlayingWidgets, state: &mut NowPlayin
     }
 }
 
-pub fn start_now_playing_polling(
-    widgets: NowPlayingWidgets,
-    state: NowPlayingState,
+/// Runs a lightweight timer that advances the seeker position locally
+/// using cached speed/duration — no Kodi API calls.
+/// Syncs `prev_val` before `update_now_playing` so the `value_changed`
+/// handler sees `curr == prev` and avoids re-entrancy / unintended seeks.
+pub fn start_local_advancement(
+    widgets: Rc<RefCell<NowPlayingWidgets>>,
+    state: Rc<RefCell<NowPlayingState>>,
+    client: Rc<RefCell<Option<KodiClient>>>,
+    prev_val: Rc<RefCell<f64>>,
 ) {
-    let client = state.client.clone();
-    let mut widgets = widgets;
-    let mut state = state;
+    glib::source::timeout_add_local(
+        std::time::Duration::from_millis(250),
+        move || {
+            let mut s = state.borrow_mut();
+            s.advance_locally();
+            *prev_val.borrow_mut() = s.percentage();
+            let mut w = widgets.borrow_mut();
+            update_now_playing(&mut *w, &mut *s, &client);
+            glib::ControlFlow::Continue
+        }
+    );
+}
 
-    glib::source::timeout_add_seconds_local(1, move || {
-        state.poll();
-        update_now_playing(&mut widgets, &mut state, &client);
-        glib::ControlFlow::Continue
-    });
+/// Triggers a single Kodi poll and refreshes the now-playing UI.
+/// Should be called after any remote button press or seeker interaction.
+/// Updates `prev_val` before `update_now_playing` so that `value_changed`
+/// on the seeker sees `curr == prev` and avoids re-entrancy / unintended seeks.
+pub fn trigger_kodi_poll(
+    widgets: &Rc<RefCell<NowPlayingWidgets>>,
+    state: &Rc<RefCell<NowPlayingState>>,
+    client: &Rc<RefCell<Option<KodiClient>>>,
+    prev_val: &Rc<RefCell<f64>>,
+) {
+    let mut s = state.borrow_mut();
+    s.poll();
+    // Sync prev_val to match what we're about to set, so the value_changed
+    // handler sees (curr - prev).abs() <= 0.5 and skips seeking / re-polling.
+    *prev_val.borrow_mut() = s.percentage();
+    let mut w = widgets.borrow_mut();
+    update_now_playing(&mut *w, &mut *s, client);
 }
 
 fn format_time(secs: i64) -> String {

@@ -7,7 +7,7 @@ use crate::host::Host;
 use crate::host::manager::HostManager;
 use crate::kodi::KodiClient;
 use crate::ui::host_list::{create_host_manager_dialog, connect_host_dialog_handlers, HostListState};
-use crate::ui::now_playing::{create_now_playing, start_now_playing_polling};
+use crate::ui::now_playing::{create_now_playing, start_local_advancement, trigger_kodi_poll};
 use crate::ui::remote::{create_remote, connect_remote_handlers};
 
 pub struct App {
@@ -145,15 +145,80 @@ fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>) -> gtk::Box {
         .vexpand(true)
         .build();
 
-        content.set_homogeneous(true);
+    content.set_homogeneous(true);
 
-    let (now_playing, np_widgets, np_state) = create_now_playing(client.clone());
-    start_now_playing_polling(np_widgets, np_state);
+    // Create now-playing component (seeker not yet connected)
+    let (now_playing, np_widgets, np_state, seeker_ctx) = create_now_playing(client.clone());
+    let np_widgets = Rc::new(RefCell::new(np_widgets));
+    let np_state = Rc::new(RefCell::new(np_state));
+
+    // Connect seeker: on user drag -> seek Kodi + trigger Kodi poll
+    let prev_val = seeker_ctx.prev_val.clone();
+    let prev_val_for_initial = prev_val.clone();
+    let player_info = seeker_ctx.player_info.clone();
+    let client_seeker = seeker_ctx.client.clone();
+    let poll_w = np_widgets.clone();
+    let poll_s = np_state.clone();
+    let poll_c = client.clone();
+    let poll_pv = prev_val.clone();
+    seeker_ctx.adjustment.connect_value_changed(move |adj| {
+        let curr = adj.value();
+        let prev = *poll_pv.borrow();
+        if (curr - prev).abs() > 0.5 {
+            *poll_pv.borrow_mut() = curr;
+            if let Some((player_id, _)) = *player_info.borrow() {
+                if let Some(ref c) = *client_seeker.borrow() {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
+                }
+            }
+            trigger_kodi_poll(&poll_w, &poll_s, &poll_c, &poll_pv);
+        }
+    });
+
+    // Start lightweight local advancement timer (no Kodi calls)
+    // Pass prev_val so the timer syncs it before set_value, avoiding re-entrancy.
+    let adv_pv = prev_val.clone();
+    start_local_advancement(np_widgets.clone(), np_state.clone(), client.clone(), adv_pv);
+
+    // Initial Kodi poll to populate now-playing UI on startup
+    trigger_kodi_poll(&np_widgets, &np_state, &client, &prev_val_for_initial);
     content.append(&now_playing);
 
+    // Remote controls
     let (remote, r_widgets, r_state) = create_remote(client.clone());
     connect_remote_handlers(&r_widgets, &r_state);
-    content.append(&remote);
 
+    // Attach Kodi poll trigger to all remote buttons
+    let buttons: [&gtk::Button; 16] = [
+        &r_widgets.btn_prev,
+        &r_widgets.btn_play,
+        &r_widgets.btn_stop,
+        &r_widgets.btn_next,
+        &r_widgets.btn_back,
+        &r_widgets.btn_home,
+        &r_widgets.btn_info,
+        &r_widgets.btn_up,
+        &r_widgets.btn_left,
+        &r_widgets.btn_ok,
+        &r_widgets.btn_right,
+        &r_widgets.btn_down,
+        &r_widgets.btn_play_pause,
+        &r_widgets.btn_mute,
+        &r_widgets.btn_voldown,
+        &r_widgets.btn_volup,
+    ];
+    let btn_pv = prev_val;
+    for btn in buttons {
+        let w = np_widgets.clone();
+        let s = np_state.clone();
+        let c = client.clone();
+        let pv = btn_pv.clone();
+        btn.connect_clicked(move |_| {
+            trigger_kodi_poll(&w, &s, &c, &pv);
+        });
+    }
+
+    content.append(&remote);
     content
 }
