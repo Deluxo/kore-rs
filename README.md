@@ -61,6 +61,6 @@ GPLv3
 
 ## Screenshots
 
-[!main](./resources/scr-main.png)
+![main](./resources/scr-main.png)
 
-[!hosts](./resources/scr-hosts.png.png)
+![hosts](./resources/scr-hosts.png.png)
