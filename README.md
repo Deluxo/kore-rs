@@ -63,4 +63,4 @@ GPLv3
 
 ![main](./resources/scr-main.png)
 
-![hosts](./resources/scr-hosts.png.png)
+![hosts](./resources/scr-hosts.png)
