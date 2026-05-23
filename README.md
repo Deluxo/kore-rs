@@ -11,30 +11,18 @@ Korers is an alternative to the official Kodi remote apps (Kore, etc.) designed 
 ### Host Management
 - Auto-discovery of Kodi instances via UDP broadcast (SSDP)
 - Manual host addition with custom address, port, and credentials
-- Wake-on-LAN support
 - Persistent host configuration
 
 ### Remote Control
 - D-pad navigation (up/down/left/right/select)
 - Transport controls (play/pause/stop/previous/next)
 - Volume control with mute toggle
-- Numeric keypad (0-9)
 - Context menu, info, back, and home buttons
 
 ### Now Playing
 - Current media info display (title, artist, album)
 - Album art/thumbnail display
 - Progress bar with seek capability
-- Transport controls
-
-### Media Library
-- Browse movies, TV shows, music
-- View favorites
-- Playlist management
-
-### Additional Features
-- System notifications
-- Input actions (context menu, info, etc.)
 
 ## Tech Stack
 
@@ -69,4 +57,10 @@ Hosts are stored in `~/.config/korers/hosts.json`.
 
 ## License
 
-MIT OR Apache-2.0
+GPLv3
+
+## Screenshots
+
+[!main](./resources/scr-main.png)
+
+[!hosts](./resources/scr-hosts.png.png)
