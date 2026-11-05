@@ -287,49 +287,39 @@ impl KodiClient {
         Ok(())
     }
 
-    pub async fn seek(&self, player_id: i32, time_secs: i64) -> Result<PlayerProperty, ClientError> {
-        #[derive(Serialize)]
-        struct Time {
-            hours: i64,
-            minutes: i64,
-            seconds: i64,
-            milliseconds: i64,
-        }
-
-        #[derive(Serialize)]
-        struct Params {
-            playerid: i32,
-            time: Time,
-        }
-
-        self.call(
-            JsonRpcRequest::new("Player.Seek").with_params(Params {
-                playerid: player_id,
-                time: Time {
-                    hours: time_secs / 3600,
-                    minutes: (time_secs % 3600) / 60,
-                    seconds: time_secs % 60,
-                    milliseconds: 0,
-                },
-            }),
-        )
-        .await
+    pub async fn seek(&self, player_id: i32, time_secs: i64) -> Result<(), ClientError> {
+        let _: serde_json::Value = self
+            .call(JsonRpcRequest::new("Player.Seek").with_params(
+                serde_json::json!({
+                    "playerid": player_id,
+                    "value": {
+                        "time": {
+                            "hours": time_secs / 3600,
+                            "minutes": (time_secs % 3600) / 60,
+                            "seconds": time_secs % 60,
+                            "milliseconds": 0,
+                        }
+                    },
+                }),
+            ))
+            .await?;
+        Ok(())
     }
 
     pub async fn seek_percentage(
         &self,
         player_id: i32,
         percentage: f64,
-    ) -> Result<PlayerProperty, ClientError> {
-        self.call(
-            JsonRpcRequest::new("Player.Seek").with_params(
+    ) -> Result<(), ClientError> {
+        let _: serde_json::Value = self
+            .call(JsonRpcRequest::new("Player.Seek").with_params(
                 serde_json::json!({
                     "playerid": player_id,
                     "value": {"percentage": percentage},
                 }),
-            ),
-        )
-        .await
+            ))
+            .await?;
+        Ok(())
     }
 
     pub async fn open(&self, file: Option<&str>) -> Result<(), ClientError> {
