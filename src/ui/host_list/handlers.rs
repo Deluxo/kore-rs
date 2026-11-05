@@ -4,20 +4,19 @@ use std::rc::Rc;
 
 use crate::io::host::Host;
 use crate::io::host::manager::HostManager;
-use crate::io::kodi::DiscoveryService;
-use crate::io::kodi::KodiClient;
+use crate::io::kodi::{ClientCell, DiscoveryService, KodiClient};
 
 use super::layout::{show_add_host_dialog, show_edit_host_dialog, HostListWidgets};
 
 pub struct HostListState {
     host_manager: Rc<RefCell<Option<HostManager>>>,
-    client: Rc<RefCell<Option<KodiClient>>>,
+    client: ClientCell,
 }
 
 impl HostListState {
     pub fn new(
         host_manager: Rc<RefCell<Option<HostManager>>>,
-        client: Rc<RefCell<Option<KodiClient>>>,
+        client: ClientCell,
     ) -> Self {
         Self {
             host_manager,
@@ -64,7 +63,7 @@ pub fn connect_host_dialog_handlers(dialog: &gtk::Dialog, widgets: &HostListWidg
                 }
             };
             if rt.block_on(kodi_client.ping()).is_ok() {
-                client.replace(Some(kodi_client));
+                *client.borrow_mut() = Some(kodi_client);
                 tracing::info!("Connected to {}", host.name);
             } else {
                 tracing::warn!("Failed to ping {}", host.name);

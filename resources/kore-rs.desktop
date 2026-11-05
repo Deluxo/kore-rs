@@ -7,3 +7,4 @@ Terminal=false
 StartupWMClass=org.korers.app
 Type=Application
 Categories=Utility;GTK;
+X-Purism-FormFactor=Workstation;Mobile;

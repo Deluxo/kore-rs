@@ -24,6 +24,21 @@ Korers is an alternative to the official Kodi remote apps (Kore, etc.) designed 
 - Album art/thumbnail display
 - Progress bar with seek capability
 
+### MPRIS / Lock Screen Controls
+- Exposes playback over D-Bus as `org.mpris.MediaPlayer2.korers`
+- Works with Phosh/GNOME/KDE media widgets and `playerctl`
+- Play, pause, stop, next, previous, seek, and volume control from the lock screen
+- Track metadata and cached artwork for the media widget
+- Driven by the existing local ticker; MPRIS adds no background Kodi polling
+
+Try it from a terminal:
+
+```bash
+playerctl --player=korers status
+playerctl --player=korers metadata
+playerctl --player=korers play-pause
+```
+
 ## Tech Stack
 
 - **UI Framework**: Relm4 + GTK4
@@ -31,6 +46,7 @@ Korers is an alternative to the official Kodi remote apps (Kore, etc.) designed 
 - **HTTP Client**: Reqwest
 - **Serialization**: Serde
 - **Discovery**: dns-sd (SSDP)
+- **MPRIS**: zbus (D-Bus)
 - **Logging**: tracing
 
 ## Building

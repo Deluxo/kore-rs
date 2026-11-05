@@ -4,7 +4,8 @@ use gtk::Scale;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::io::kodi::KodiClient;
+use crate::io::kodi::ClientCell;
+use crate::io::mpris::MprisSnapshot;
 
 pub struct NowPlayingWidgets {
     pub title_label: gtk::Label,
@@ -19,10 +20,15 @@ pub struct NowPlayingWidgets {
 }
 
 pub struct NowPlayingState {
-    client: Rc<RefCell<Option<KodiClient>>>,
+    client: ClientCell,
     pub title: String,
     pub description: String,
     pub plot: String,
+    pub artists: Vec<String>,
+    pub album: String,
+    pub track_id: String,
+    pub art_url: Option<String>,
+    pub volume: Option<i32>,
     pub current_time: i64,
     pub duration: i64,
     player_info: Rc<RefCell<Option<(i32, i64)>>>,
@@ -35,12 +41,17 @@ pub struct NowPlayingState {
 }
 
 impl NowPlayingState {
-    pub fn new(client: Rc<RefCell<Option<KodiClient>>>) -> Self {
+    pub fn new(client: ClientCell) -> Self {
         Self {
             client,
             title: "No media playing".to_string(),
             description: String::new(),
             plot: String::new(),
+            artists: Vec::new(),
+            album: String::new(),
+            track_id: String::new(),
+            art_url: None,
+            volume: None,
             current_time: 0,
             duration: 0,
             player_info: Rc::new(RefCell::new(None)),
@@ -57,8 +68,13 @@ impl NowPlayingState {
         self.title = "No media playing".to_string();
         self.description = String::new();
         self.plot = String::new();
+        self.artists.clear();
+        self.album.clear();
+        self.track_id.clear();
+        self.art_url = None;
         self.thumbnail = None;
-        self.last_thumbnail = None;
+        // Force the next render to hide any stale poster/artwork.
+        self.last_thumbnail = Some(String::new());
         self.current_time = 0;
         self.duration = 0;
         self.cached_speed = 0.0;
@@ -75,10 +91,11 @@ impl NowPlayingState {
     }
 
     pub fn poll(&mut self) {
-        let client = self.client.borrow();
-        let c = if let Some(ref c) = *client {
-            c
-        } else {
+        let client = match self.client.try_borrow() {
+            Ok(client) => client,
+            Err(_) => return,
+        };
+        let Some(c) = client.as_ref() else {
             tracing::debug!("No Kodi client available for poll");
             return;
         };
@@ -89,6 +106,9 @@ impl NowPlayingState {
                 return;
             }
         };
+        if let Ok(props) = rt.block_on(c.get_application_properties()) {
+            self.volume = Some(props.volume);
+        }
         let players = rt.block_on(c.get_active_players());
         tracing::debug!("Poll - players: {:?}", players);
 
@@ -110,15 +130,8 @@ impl NowPlayingState {
                         if let Ok(recheck) = rt.block_on(c.get_active_players()) {
                             if recheck.is_empty() {
                                 tracing::info!("Player stopped (re-check after speed=0)");
-                                self.title = "No media playing".to_string();
-                                self.description = String::new();
-                                self.plot = String::new();
-                                self.thumbnail = None;
-                                self.current_time = 0;
-                                self.duration = 0;
-                                self.cached_speed = 0.0;
-                                self.has_player = false;
-                                *self.player_info.borrow_mut() = None;
+                                drop(client);
+                                self.reset();
                                 return;
                             }
                         } else {
@@ -154,22 +167,48 @@ impl NowPlayingState {
                     self.description = desc;
                     self.title = title;
                     self.plot = item.plot.clone().unwrap_or_else(|| item.tagline.clone().unwrap_or_default());
+                    self.artists = item.artist.clone().unwrap_or_default();
+                    self.album = item
+                        .album
+                        .clone()
+                        .or_else(|| item.showtitle.clone())
+                        .unwrap_or_default();
+                    self.track_id = crate::io::mpris::track_id(&item);
                     self.thumbnail = transform::resolve_thumbnail(
                         item.art.as_ref().and_then(|art| art.poster.as_deref()),
                         item.thumbnail.as_deref(),
                     );
                 }
             } else {
-                self.title = "No media playing".to_string();
-                self.description = String::new();
-                self.plot = String::new();
-                self.thumbnail = None;
-                self.current_time = 0;
-                self.duration = 0;
-                self.cached_speed = 0.0;
-                self.has_player = false;
-                *self.player_info.borrow_mut() = None;
+                drop(client);
+                self.reset();
             }
+        }
+    }
+
+    /// Build the state that the MPRIS service exposes on D-Bus.
+    pub fn snapshot(&self) -> MprisSnapshot {
+        let playback_status = if !self.has_player {
+            "Stopped"
+        } else if self.cached_speed > 0.0 {
+            "Playing"
+        } else {
+            "Paused"
+        };
+
+        MprisSnapshot {
+            playback_status: playback_status.to_string(),
+            position_micros: self.current_time.saturating_mul(1_000_000),
+            duration_micros: self.duration.saturating_mul(1_000_000),
+            speed: self.cached_speed,
+            title: self.title.clone(),
+            artists: self.artists.clone(),
+            album: self.album.clone(),
+            art_url: self.art_url.clone().unwrap_or_default(),
+            track_id: self.track_id.clone(),
+            has_player: self.has_player,
+            volume: self.volume.map(|v| v as f64 / 100.0).unwrap_or(0.5),
+            updated: std::time::Instant::now(),
         }
     }
 
@@ -186,11 +225,11 @@ impl NowPlayingState {
 pub struct SeekerContext {
     pub adjustment: gtk::Adjustment,
     pub player_info: Rc<RefCell<Option<(i32, i64)>>>,
-    pub client: Rc<RefCell<Option<KodiClient>>>,
+    pub client: ClientCell,
     pub prev_val: Rc<RefCell<f64>>,
 }
 
-pub fn create_now_playing(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, NowPlayingWidgets, NowPlayingState, SeekerContext) {
+pub fn create_now_playing(client: ClientCell) -> (gtk::Box, NowPlayingWidgets, NowPlayingState, SeekerContext) {
     let state = NowPlayingState::new(client.clone());
 
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 8);

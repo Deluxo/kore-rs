@@ -1,8 +1,6 @@
 use gtk::prelude::*;
-use std::cell::RefCell;
-use std::rc::Rc;
 
-use crate::io::kodi::KodiClient;
+use crate::io::kodi::ClientCell;
 
 pub struct RemoteWidgets {
     pub btn_prev: gtk::Button,
@@ -24,20 +22,20 @@ pub struct RemoteWidgets {
 }
 
 pub struct RemoteState {
-    client: Rc<RefCell<Option<KodiClient>>>,
+    client: ClientCell,
 }
 
 impl RemoteState {
-    pub fn new(client: Rc<RefCell<Option<KodiClient>>>) -> Self {
+    pub fn new(client: ClientCell) -> Self {
         Self { client }
     }
 
-    pub fn client(&self) -> &Rc<RefCell<Option<KodiClient>>> {
+    pub fn client(&self) -> &ClientCell {
         &self.client
     }
 }
 
-pub fn create_remote(client: Rc<RefCell<Option<KodiClient>>>) -> (gtk::Box, RemoteWidgets, RemoteState) {
+pub fn create_remote(client: ClientCell) -> (gtk::Box, RemoteWidgets, RemoteState) {
     let state = RemoteState::new(client);
 
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 16);

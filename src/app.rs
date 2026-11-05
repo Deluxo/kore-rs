@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use crate::io::host::Host;
 use crate::io::host::manager::HostManager;
-use crate::io::kodi::KodiClient;
+use crate::io::kodi::{ClientCell, KodiClient};
+use crate::io::mpris::{MprisHandle, MprisService};
 use crate::ui::host_list::{create_host_manager_dialog, connect_host_dialog_handlers, HostListState};
 use crate::ui::now_playing::{create_now_playing, start_local_advancement, trigger_kodi_poll, update_now_playing};
 use crate::ui::remote::{create_remote, connect_remote_handlers};
@@ -53,6 +54,12 @@ impl App {
     pub fn show_window(self) -> Self {
         let hosts = self.hosts.clone();
         let host_manager = self.host_manager.clone();
+        let client = auto_connect_first_host(&hosts);
+
+        // MPRIS is driven by the local GTK ticker: the D-Bus thread only
+        // publishes snapshots and queues commands, never talks to Kodi.
+        let (mpris, mpris_handle) = MprisService::new();
+        mpris.start();
 
         self.app.connect_activate(move |app| {
             if let Some(settings) = gtk::Settings::default() {
@@ -60,11 +67,14 @@ impl App {
             } else {
                 tracing::debug!("No GTK settings available");
             }
-            
+
             let window = create_main_window(app);
-            let header = create_header_bar(&host_manager, &hosts);
-            let client = auto_connect_first_host(&hosts);
-            let content = create_main_content(client.clone(), &window);
+            let header = create_header_bar(&host_manager, &hosts, client.clone());
+            let content = create_main_content(
+                client.clone(),
+                &window,
+                mpris_handle.clone(),
+            );
 
             window.set_titlebar(Some(&header));
             window.set_child(Some(&content));
@@ -101,6 +111,7 @@ fn create_main_window(app: &gtk::Application) -> gtk::ApplicationWindow {
 fn create_header_bar(
     host_manager: &Rc<RefCell<Option<HostManager>>>,
     hosts: &[Host],
+    client: ClientCell,
 ) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::builder()
         .title_widget(&gtk::Label::new(Some("Korers")))
@@ -112,7 +123,6 @@ fn create_header_bar(
         .tooltip_text("Manage hosts")
         .build();
 
-    let client: Rc<RefCell<Option<KodiClient>>> = Rc::new(RefCell::new(None));
     let (dialog, widgets) = create_host_manager_dialog(hosts);
     let state = HostListState::new(host_manager.clone(), client);
     connect_host_dialog_handlers(&dialog, &widgets, &state);
@@ -127,8 +137,8 @@ fn create_header_bar(
     header
 }
 
-fn auto_connect_first_host(hosts: &[Host]) -> Rc<RefCell<Option<KodiClient>>> {
-    let client: Rc<RefCell<Option<KodiClient>>> = Rc::new(RefCell::new(None));
+fn auto_connect_first_host(hosts: &[Host]) -> ClientCell {
+    let client: ClientCell = Rc::new(RefCell::new(None));
 
     if let Some(first_host) = hosts.first() {
         let kodi_client = KodiClient::from_host(first_host);
@@ -140,7 +150,7 @@ fn auto_connect_first_host(hosts: &[Host]) -> Rc<RefCell<Option<KodiClient>>> {
             }
         };
         if rt.block_on(kodi_client.ping()).is_ok() {
-            client.replace(Some(kodi_client));
+            *client.borrow_mut() = Some(kodi_client);
             tracing::info!("Auto-connected to {}", first_host.name);
         } else {
             tracing::warn!("Failed to ping {} for auto-connect", first_host.name);
@@ -152,7 +162,11 @@ fn auto_connect_first_host(hosts: &[Host]) -> Rc<RefCell<Option<KodiClient>>> {
     client
 }
 
-fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>, window: &gtk::ApplicationWindow) -> gtk::Box {
+fn create_main_content(
+    client: ClientCell,
+    window: &gtk::ApplicationWindow,
+    mpris: MprisHandle,
+) -> gtk::Box {
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .hexpand(true)
@@ -181,19 +195,27 @@ fn create_main_content(client: Rc<RefCell<Option<KodiClient>>>, window: &gtk::Ap
         if (curr - prev).abs() > 0.5 {
             *poll_pv.borrow_mut() = curr;
             if let Some((player_id, _)) = *player_info.borrow() {
-                if let Some(ref c) = *client_seeker.borrow() {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    let _ = rt.block_on(c.seek_percentage(player_id, curr));
+                if let Ok(client) = client_seeker.try_borrow() {
+                    if let Some(c) = client.as_ref() {
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        let _ = rt.block_on(c.seek_percentage(player_id, curr));
+                    }
                 }
             }
             trigger_kodi_poll(&poll_w, &poll_s, &poll_c, &poll_pv);
         }
     });
 
-    // Start lightweight local advancement timer (no Kodi calls)
-    // Pass prev_val so the timer syncs it before set_value, avoiding re-entrancy.
+    // Start the local ticker. It advances playback, updates the UI, executes
+    // queued MPRIS commands and publishes MPRIS state. No background Kodi I/O.
     let adv_pv = prev_val.clone();
-    start_local_advancement(np_widgets.clone(), np_state.clone(), client.clone(), adv_pv);
+    start_local_advancement(
+        np_widgets.clone(),
+        np_state.clone(),
+        client.clone(),
+        adv_pv,
+        mpris,
+    );
 
     // Initial Kodi poll to populate now-playing UI on startup
     trigger_kodi_poll(&np_widgets, &np_state, &client, &prev_val_for_initial);
